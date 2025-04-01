@@ -40,6 +40,8 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadSpeed, setUploadSpeed] = useState<string>('');
+  const [estimatedTimeLeft, setEstimatedTimeLeft] = useState<string>('');
   
   const form = useForm<UploadFormValues>({
     resolver: zodResolver(uploadFormSchema),
@@ -52,13 +54,62 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
     try {
       setIsUploading(true);
       setUploadProgress(0);
+      setUploadSpeed('Calculating...');
+      setEstimatedTimeLeft('Calculating...');
       
       const fileToUpload: File = data.file;
+      const startTime = Date.now();
+      const fileSize = fileToUpload.size;
+      let lastLoaded = 0;
+      let lastTime = startTime;
       
-      // Track progress in real-time
+      // Track progress in real-time with speed calculation
       const trackProgress = (progress: number) => {
         console.log(`Upload progress: ${progress}%`);
         setUploadProgress(progress);
+        
+        const currentTime = Date.now();
+        const timeElapsed = (currentTime - startTime) / 1000; // in seconds
+        
+        // Only calculate speed after we have some progress
+        if (progress > 0) {
+          // Calculate loaded bytes based on percentage
+          const loadedBytes = (fileSize * progress) / 100;
+          
+          // Calculate time difference since last update (in seconds)
+          const timeSinceLastUpdate = (currentTime - lastTime) / 1000;
+          
+          if (timeSinceLastUpdate > 0) {
+            // Calculate bytes uploaded since last update
+            const bytesSinceLastUpdate = loadedBytes - lastLoaded;
+            
+            // Calculate current speed in bytes per second
+            const currentSpeed = bytesSinceLastUpdate / timeSinceLastUpdate;
+            
+            // Update speed in user-friendly format
+            if (currentSpeed > 1024 * 1024) {
+              setUploadSpeed(`${(currentSpeed / (1024 * 1024)).toFixed(2)} MB/s`);
+            } else if (currentSpeed > 1024) {
+              setUploadSpeed(`${(currentSpeed / 1024).toFixed(2)} KB/s`);
+            } else {
+              setUploadSpeed(`${Math.round(currentSpeed)} B/s`);
+            }
+            
+            // Calculate estimated time remaining
+            const bytesRemaining = fileSize - loadedBytes;
+            const timeRemaining = bytesRemaining / currentSpeed;
+            
+            if (timeRemaining > 60) {
+              setEstimatedTimeLeft(`${Math.round(timeRemaining / 60)} minutes`);
+            } else {
+              setEstimatedTimeLeft(`${Math.round(timeRemaining)} seconds`);
+            }
+            
+            // Update last values for next calculation
+            lastLoaded = loadedBytes;
+            lastTime = currentTime;
+          }
+        }
       };
       
       await uploadNote(
@@ -77,6 +128,8 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
       form.reset();
       setSelectedFile(null);
       setUploadProgress(0);
+      setUploadSpeed('');
+      setEstimatedTimeLeft('');
       if (onSuccess) onSuccess();
     } catch (error: any) {
       console.error("Error uploading note:", error);
@@ -94,7 +147,7 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       setSelectedFile(files[0]);
-      // Use files as FileList directly since the schema handles it properly
+      // Pass the files directly to form.setValue
       form.setValue("file", files, { shouldValidate: true });
     } else {
       setSelectedFile(null);
@@ -176,6 +229,12 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
               <span>{uploadProgress}%</span>
             </div>
             <Progress value={uploadProgress} className="h-2" />
+            {uploadSpeed && (
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>Speed: {uploadSpeed}</span>
+                <span>Estimated time: {estimatedTimeLeft}</span>
+              </div>
+            )}
           </div>
         )}
         
