@@ -62,18 +62,39 @@ export async function rateNote(
   userId: string,
   rating: number
 ): Promise<void> {
-  // Insert new rating
-  const { error } = await supabase
+  // First check if there's an existing rating to avoid duplicates
+  const { data: existingRating } = await supabase
     .from("ratings")
-    .insert({
-      note_id: noteId,
-      user_id: userId,
-      rating,
-    });
+    .select("id")
+    .eq("note_id", noteId)
+    .eq("user_id", userId);
+    
+  if (existingRating && existingRating.length > 0) {
+    // Update existing rating
+    const { error } = await supabase
+      .from("ratings")
+      .update({ rating })
+      .eq("note_id", noteId)
+      .eq("user_id", userId);
+      
+    if (error) {
+      console.error("Error updating rating:", error);
+      throw error;
+    }
+  } else {
+    // Insert new rating
+    const { error } = await supabase
+      .from("ratings")
+      .insert({
+        note_id: noteId,
+        user_id: userId,
+        rating,
+      });
 
-  if (error) {
-    console.error("Error inserting rating:", error);
-    throw error;
+    if (error) {
+      console.error("Error inserting rating:", error);
+      throw error;
+    }
   }
 }
 
@@ -95,11 +116,15 @@ export async function uploadNote(
   const { error: uploadError, data } = await supabase.storage
     .from("notes")
     .upload(filePath, file, {
-      onUploadProgress: (progress) => {
-        // Calculate percentage
-        const percent = Math.round((progress.loaded / progress.totalBytes) * 100);
-        if (onProgress) {
-          onProgress(percent);
+      cacheControl: "3600",
+      upsert: false,
+      // Progress tracking needs to use the progress event
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+          if (onProgress) {
+            onProgress(percent);
+          }
         }
       },
     });

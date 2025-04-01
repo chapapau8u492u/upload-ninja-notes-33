@@ -53,11 +53,11 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
       setIsUploading(true);
       setUploadProgress(0);
       
-      // Create custom upload function with progress tracking
       const fileToUpload: File = data.file;
       
-      // Custom progress tracker
+      // Track progress in real-time
       const trackProgress = (progress: number) => {
+        console.log(`Upload progress: ${progress}%`);
         setUploadProgress(progress);
       };
       
@@ -124,14 +124,28 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
             <FormItem>
               <FormLabel>File</FormLabel>
               <FormControl>
-                <Input
-                  type="file"
-                  onChange={(e) => {
-                    onChange(e.target.files);
-                    handleFileChange(e);
-                  }}
-                  {...rest}
-                />
+                <div className="flex flex-col space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="file"
+                      id="file-upload"
+                      className="hidden"
+                      onChange={(e) => {
+                        handleFileChange(e);
+                      }}
+                      {...rest}
+                    />
+                    <label
+                      htmlFor="file-upload"
+                      className="cursor-pointer flex items-center justify-center w-full gap-2 border-2 border-dashed border-gray-300 rounded-md py-3 px-4 hover:bg-gray-50 transition-colors"
+                    >
+                      <FileUp className="h-5 w-5 text-gray-500" />
+                      <span className="text-gray-500">
+                        {selectedFile ? "Change file" : "Select a file"}
+                      </span>
+                    </label>
+                  </div>
+                </div>
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -143,9 +157,9 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
             <CardContent className="pt-4">
               <div className="flex items-center gap-3">
                 <FileText className="h-6 w-6 text-blue-500" />
-                <div>
-                  <p className="font-medium">{selectedFile.name}</p>
-                  <p className="text-sm text-gray-500">
+                <div className="flex-1">
+                  <p className="font-medium text-sm">{selectedFile.name}</p>
+                  <p className="text-xs text-gray-500">
                     {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
                   </p>
                 </div>

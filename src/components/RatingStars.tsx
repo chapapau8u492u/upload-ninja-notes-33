@@ -33,8 +33,16 @@ export const RatingStars = ({
 
     try {
       setIsLoading(true);
-      // Use anonymous ratings instead of user-based
-      await rateNote(noteId, "anonymous", newRating);
+      // Generate a unique ID for anonymous users
+      const anonymousId = localStorage.getItem('anonymous_user_id') || 
+        `anon_${Math.random().toString(36).substring(2, 15)}`;
+      
+      // Store the ID in localStorage for future use
+      if (!localStorage.getItem('anonymous_user_id')) {
+        localStorage.setItem('anonymous_user_id', anonymousId);
+      }
+      
+      await rateNote(noteId, anonymousId, newRating);
       setRating(newRating);
       
       if (onRatingChange) {
