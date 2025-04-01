@@ -1,13 +1,11 @@
+
 import { supabase } from "@/integrations/supabase/client";
-import { Note, NoteWithDetails, Rating } from "@/types";
+import { Note, NoteWithDetails } from "@/types";
 
 export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[]> {
   let query = supabase
     .from("notes")
-    .select(`
-      *,
-      ratings(rating)
-    `)
+    .select("*")
     .order("created_at", { ascending: false });
 
   if (searchQuery) {
@@ -21,104 +19,15 @@ export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[
     throw error;
   }
 
-  // Map and calculate average ratings
-  const notesWithRatings = (data || []).map((note: any) => {
-    const ratings = note.ratings || [];
-    const ratingsSum = ratings.reduce((sum: number, r: any) => sum + r.rating, 0);
-    const averageRating = ratings.length > 0 ? ratingsSum / ratings.length : null;
-
+  // Map notes to include default profile information
+  const notes = (data || []).map((note: any) => {
     return {
       ...note,
       profile: { username: "Anonymous User" }, // Default profile for all notes
-      average_rating: averageRating,
-      ratings_count: ratings.length,
     };
   });
 
-  // Sort by average rating (highest first), with null ratings at the end
-  return notesWithRatings.sort((a, b) => {
-    if (a.average_rating === null && b.average_rating === null) return 0;
-    if (a.average_rating === null) return 1;
-    if (b.average_rating === null) return -1;
-    return b.average_rating - a.average_rating;
-  });
-}
-
-export async function getUserRating(noteId: string, deviceId: string): Promise<number | null> {
-  if (!deviceId) return null;
-  
-  try {
-    // Instead of querying the database directly, use localStorage
-    // This avoids the UUID format issue
-    const ratingKey = `rating_${noteId}_${deviceId}`;
-    const savedRating = localStorage.getItem(ratingKey);
-    
-    // Return the rating from localStorage if available
-    return savedRating ? parseInt(savedRating, 10) : null;
-  } catch (error) {
-    console.error("Error in getUserRating:", error);
-    return null;
-  }
-}
-
-export async function rateNote(
-  noteId: string,
-  deviceId: string,
-  rating: number
-): Promise<void> {
-  // Always save to localStorage for consistent user experience
-  const ratingKey = `rating_${noteId}_${deviceId}`;
-  localStorage.setItem(ratingKey, rating.toString());
-  
-  try {
-    // Generate a proper UUID for the database
-    // We'll use a deterministic method to generate a UUID from the deviceId
-    // This way, the same device always gets the same UUID
-    const { data: existingRatings, error: fetchError } = await supabase
-      .from("ratings")
-      .select("id")
-      .eq("note_id", noteId)
-      .filter("user_id", "ilike", `%${deviceId.slice(-8)}%`);
-      
-    if (fetchError) {
-      console.error("Error checking for existing rating:", fetchError);
-      // Continue with localStorage only
-      return;
-    }
-    
-    if (existingRatings && existingRatings.length > 0) {
-      // Update existing rating
-      const { error } = await supabase
-        .from("ratings")
-        .update({ rating })
-        .eq("id", existingRatings[0].id);
-        
-      if (error) {
-        console.error("Error updating rating:", error);
-        // We already stored in localStorage, so user still sees their rating
-      }
-    } else {
-      // For new ratings, generate a random UUID for user_id instead of using deviceId
-      const randomUuid = crypto.randomUUID();
-      
-      // Insert new rating with the proper UUID format
-      const { error } = await supabase
-        .from("ratings")
-        .insert({
-          note_id: noteId,
-          user_id: randomUuid,
-          rating,
-        });
-
-      if (error) {
-        console.error("Error inserting rating:", error);
-        // We already stored in localStorage, so user still sees their rating
-      }
-    }
-  } catch (error) {
-    console.error("Error rating note:", error);
-    // Rating is already saved to localStorage, so the user will still see their rating
-  }
+  return notes;
 }
 
 export async function uploadNote(
@@ -260,7 +169,7 @@ export async function deleteNote(note: Note): Promise<void> {
     throw storageError;
   }
 
-  // 2. Delete the note record (will cascade delete ratings)
+  // 2. Delete the note record
   const { error: dbError } = await supabase
     .from("notes")
     .delete()

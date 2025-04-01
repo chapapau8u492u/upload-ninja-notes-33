@@ -19,17 +19,6 @@ export interface Profile {
   created_at: string;
 }
 
-export interface Rating {
-  id: string;
-  note_id: string;
-  user_id: string;
-  rating: number;
-  created_at: string;
-}
-
 export interface NoteWithDetails extends Note {
   profile: Profile;
-  average_rating: number | null;
-  ratings_count: number;
-  user_rating?: number;
 }

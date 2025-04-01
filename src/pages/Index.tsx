@@ -6,10 +6,9 @@ import { Input } from "@/components/ui/input";
 import { NoteCard } from "@/components/NoteCard";
 import { fetchNotes } from "@/lib/api";
 import { NoteWithDetails } from "@/types";
-import { FileText, Search, Upload, Star } from "lucide-react";
+import { FileText, Search, Upload } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -17,23 +16,12 @@ const Index = () => {
   const [notes, setNotes] = useState<NoteWithDetails[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState<"rating" | "date">("rating");
   
   const loadNotes = async () => {
     try {
       setIsLoading(true);
       const fetchedNotes = await fetchNotes(searchQuery || undefined);
-      
-      // Sort notes based on the selected sorting option
-      const sortedNotes = [...fetchedNotes];
-      if (sortBy === "date") {
-        sortedNotes.sort((a, b) => {
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        });
-      }
-      // for rating, we're already sorting in the API function
-      
-      setNotes(sortedNotes);
+      setNotes(fetchedNotes);
     } catch (error) {
       console.error("Error fetching notes:", error);
     } finally {
@@ -43,7 +31,7 @@ const Index = () => {
   
   useEffect(() => {
     loadNotes();
-  }, [sortBy]);
+  }, []);
   
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,22 +104,6 @@ const Index = () => {
             <h2 className="text-2xl font-bold">
               {searchQuery ? "Search Results" : "All Notes"}
             </h2>
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2">
-                  <span>Sort by: {sortBy === "rating" ? "Rating" : "Date"}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setSortBy("rating")}>
-                  <Star className="mr-2 h-4 w-4" /> Highest Rating
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setSortBy("date")}>
-                  <FileText className="mr-2 h-4 w-4" /> Latest Upload
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
           
           {isLoading ? (
