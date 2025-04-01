@@ -1,4 +1,3 @@
-
 import { supabase } from "@/integrations/supabase/client";
 import { Note, NoteWithDetails, Rating } from "@/types";
 
@@ -113,15 +112,18 @@ export async function uploadNote(
   const filePath = `${folderName}/${fileName}`;
 
   // 1. Upload the file to storage
-  // Use XMLHttpRequest for progress tracking instead of the built-in upload progress
+  // Use XMLHttpRequest for progress tracking
   const { error: uploadError, data } = await new Promise<{error: any, data: any}>((resolve) => {
-    // Set up progress tracking with XMLHttpRequest
+    // If progress tracking needed, use XMLHttpRequest
     if (onProgress) {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${supabase.storage.url}/object/notes/${filePath}`);
+      // Use proper URL construction - don't access protected properties
+      const uploadUrl = `${supabase.storageUrl}/object/notes/${filePath}`;
+      xhr.open('POST', uploadUrl);
       
-      // Add supabase headers
-      xhr.setRequestHeader('Authorization', `Bearer ${supabase.supabaseKey}`);
+      // Add supabase headers - don't access protected properties
+      const apiKey = supabase.supabaseKey;
+      xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`);
       xhr.setRequestHeader('x-upsert', 'false');
       
       // Set up progress event
@@ -244,3 +246,18 @@ export function getFileUrl(filePath: string): string {
 export async function getUserNotes(userId: string): Promise<NoteWithDetails[]> {
   return []; // Since we don't have auth, just return empty array
 }
+
+// Add helper properties for the protected properties we can't access directly
+// This needs to be added
+Object.defineProperties(supabase, {
+  storageUrl: {
+    get() {
+      return 'https://qxmmsuakpqgcfhmngmjb.supabase.co/storage/v1';
+    }
+  },
+  supabaseKey: {
+    get() {
+      return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF4bW1zdWFrcHFnY2ZobW5nbWpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0ODEzNzcsImV4cCI6MjA1OTA1NzM3N30.BkT-HrDlR2HJ6iAhuaIFMD7H_jRFIu0Y9hpiSyU4EHY';
+    }
+  }
+});
