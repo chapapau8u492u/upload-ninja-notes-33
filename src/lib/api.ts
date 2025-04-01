@@ -1,3 +1,4 @@
+
 import { supabase } from "@/integrations/supabase/client";
 import { Note, NoteWithDetails, Rating } from "@/types";
 
@@ -117,11 +118,11 @@ export async function uploadNote(
     // If progress tracking needed, use XMLHttpRequest
     if (onProgress) {
       const xhr = new XMLHttpRequest();
-      // Use proper URL construction - don't access protected properties
+      // Use proper URL construction with helper property
       const uploadUrl = `${supabase.storageUrl}/object/notes/${filePath}`;
       xhr.open('POST', uploadUrl);
       
-      // Add supabase headers - don't access protected properties
+      // Add supabase headers with helper property
       const apiKey = supabase.supabaseKey;
       xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`);
       xhr.setRequestHeader('x-upsert', 'false');
@@ -248,7 +249,6 @@ export async function getUserNotes(userId: string): Promise<NoteWithDetails[]> {
 }
 
 // Add helper properties for the protected properties we can't access directly
-// This needs to be added
 Object.defineProperties(supabase, {
   storageUrl: {
     get() {
