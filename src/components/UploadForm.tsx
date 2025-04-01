@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -39,7 +40,8 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadSpeed, setUploadSpeed] = useState<string>('Initializing...');
+  const [uploadedBytes, setUploadedBytes] = useState(0);
+  const [uploadSpeed, setUploadSpeed] = useState<string>('Calculating...');
   const [estimatedTimeLeft, setEstimatedTimeLeft] = useState<string>('Calculating...');
   
   const form = useForm<UploadFormValues>({
@@ -53,7 +55,8 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
     try {
       setIsUploading(true);
       setUploadProgress(0);
-      setUploadSpeed('Initializing...');
+      setUploadedBytes(0);
+      setUploadSpeed('Calculating...');
       setEstimatedTimeLeft('Calculating...');
       
       const fileToUpload: File = data.file;
@@ -63,46 +66,41 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
       let lastTime = startTime;
       let speedHistory: number[] = [];
       
-      const initialEstimate = getInitialTimeEstimate(fileSize);
-      setEstimatedTimeLeft(initialEstimate);
-      
-      const trackProgress = (progress: number) => {
-        console.log(`Upload progress: ${progress}%`);
+      const trackProgress = (loaded: number, total: number) => {
+        const progress = Math.round((loaded / total) * 100);
+        console.log(`Upload progress: ${progress}%, ${formatFileSize(loaded)}/${formatFileSize(total)}`);
+        
         setUploadProgress(progress);
+        setUploadedBytes(loaded);
         
         const currentTime = Date.now();
-        const timeElapsed = (currentTime - startTime) / 1000; // in seconds
+        const timeElapsed = (currentTime - lastTime) / 1000; // in seconds
         
-        if (progress > 0) {
-          const loadedBytes = (fileSize * progress) / 100;
-          const timeDiff = (currentTime - lastTime) / 1000;
+        if (timeElapsed > 0) {
+          const bytesDiff = loaded - lastLoaded;
+          const currentSpeed = bytesDiff / timeElapsed;
           
-          if (timeDiff > 0) {
-            const bytesDiff = loadedBytes - lastLoaded;
-            const currentSpeed = bytesDiff / timeDiff;
-            
-            if (currentSpeed > 0) {
-              speedHistory.push(currentSpeed);
-              if (speedHistory.length > 5) {
-                speedHistory.shift();
-              }
+          if (currentSpeed > 0) {
+            speedHistory.push(currentSpeed);
+            if (speedHistory.length > 5) {
+              speedHistory.shift();
             }
-            
-            const avgSpeed = speedHistory.length > 0 
-              ? speedHistory.reduce((sum, speed) => sum + speed, 0) / speedHistory.length 
-              : currentSpeed;
-            
-            setUploadSpeed(formatSpeed(avgSpeed));
-            
-            if (avgSpeed > 0) {
-              const bytesRemaining = fileSize - loadedBytes;
-              const timeRemaining = bytesRemaining / avgSpeed;
-              setEstimatedTimeLeft(formatTime(timeRemaining));
-            }
-            
-            lastLoaded = loadedBytes;
-            lastTime = currentTime;
           }
+          
+          const avgSpeed = speedHistory.length > 0 
+            ? speedHistory.reduce((sum, speed) => sum + speed, 0) / speedHistory.length 
+            : currentSpeed;
+          
+          setUploadSpeed(formatSpeed(avgSpeed));
+          
+          if (avgSpeed > 0) {
+            const bytesRemaining = total - loaded;
+            const timeRemaining = bytesRemaining / avgSpeed;
+            setEstimatedTimeLeft(formatTime(timeRemaining));
+          }
+          
+          lastLoaded = loaded;
+          lastTime = currentTime;
         }
       };
       
@@ -122,6 +120,7 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
       form.reset();
       setSelectedFile(null);
       setUploadProgress(0);
+      setUploadedBytes(0);
       setUploadSpeed('');
       setEstimatedTimeLeft('');
       if (onSuccess) onSuccess();
@@ -181,23 +180,6 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
       const minutes = Math.floor((seconds % 3600) / 60);
       return `${hours}:${minutes.toString().padStart(2, '0')} hours`;
     }
-  };
-  
-  const getInitialTimeEstimate = (bytes: number): string => {
-    let assumedSpeed: number;
-    
-    if (bytes > 100 * 1024 * 1024) {
-      assumedSpeed = 500 * 1024;
-    } else if (bytes > 50 * 1024 * 1024) {
-      assumedSpeed = 750 * 1024;
-    } else if (bytes > 10 * 1024 * 1024) {
-      assumedSpeed = 1 * 1024 * 1024;
-    } else {
-      assumedSpeed = 1.5 * 1024 * 1024;
-    }
-    
-    const estimatedSeconds = bytes / assumedSpeed;
-    return formatTime(estimatedSeconds);
   };
   
   return (
@@ -272,7 +254,11 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
           <div className="space-y-2">
             <div className="flex justify-between text-sm text-gray-500">
               <span>Uploading...</span>
-              <span>{uploadProgress}%</span>
+              <span>
+                {uploadProgress}% • {selectedFile && uploadedBytes > 0 ? 
+                  `${formatFileSize(uploadedBytes)}/${formatFileSize(selectedFile.size)}` : 
+                  'Starting...'}
+              </span>
             </div>
             <Progress value={uploadProgress} className="h-2" />
             {uploadSpeed && (

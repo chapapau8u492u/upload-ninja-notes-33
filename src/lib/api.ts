@@ -102,7 +102,7 @@ export async function uploadNote(
   description: string,
   file: File,
   userId: string | null,
-  onProgress?: (progress: number) => void
+  onProgress?: (loaded: number, total: number) => void
 ): Promise<void> {
   console.log("Starting file upload:", { title, fileName: file.name });
   const fileName = `${Date.now()}_${file.name}`;
@@ -110,18 +110,13 @@ export async function uploadNote(
   // Create folder path - always use 'anonymous' since we don't have auth
   const folderName = 'anonymous';
   const filePath = `${folderName}/${fileName}`;
-
-  // Start with initial progress of 0
-  if (onProgress) onProgress(0);
-
-  // Implement chunked upload for large files
-  if (file.size > 10 * 1024 * 1024) { // If file is larger than 10MB
-    await uploadLargeFile(filePath, file, onProgress);
-  } else {
-    // For smaller files use regular upload with progress tracking
-    await uploadWithProgress(filePath, file, onProgress);
-  }
-
+  
+  // Start with initial progress
+  if (onProgress) onProgress(0, file.size);
+  
+  // For all files, use the direct XHR upload to track progress accurately
+  await uploadWithProgress(filePath, file, onProgress);
+  
   // Get the public URL of the uploaded file
   const fileUrl = getFileUrl(filePath);
   
@@ -154,177 +149,66 @@ export async function uploadNote(
   console.log("Note record created successfully");
 }
 
-// Helper function for chunked upload of large files with improved progress tracking
-async function uploadLargeFile(filePath: string, file: File, onProgress?: (progress: number) => void): Promise<void> {
-  const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks - Supabase recommended size
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-  
-  console.log(`Splitting ${file.name} into ${totalChunks} chunks of ${CHUNK_SIZE / (1024 * 1024)}MB each`);
-  
-  // Create an array to track individual chunk progress
-  const chunkProgress = new Array(totalChunks).fill(0);
-  
-  // Function to update total progress based on individual chunk progress
-  const updateTotalProgress = () => {
-    if (onProgress) {
-      const totalProgress = chunkProgress.reduce((sum, progress) => sum + progress, 0) / totalChunks;
-      onProgress(Math.round(totalProgress));
-    }
-  };
-  
-  // Using a more efficient approach with concurrent chunk uploads
-  const chunkPromises = [];
-  const MAX_CONCURRENT_CHUNKS = 3; // Control concurrency - adjust based on testing
-  let activeChunks = 0;
-  let nextChunkIndex = 0;
-  
-  // Process chunks sequentially with controlled parallelism
-  const processNextChunk = async () => {
-    if (nextChunkIndex >= totalChunks) return;
-    
-    const chunkIndex = nextChunkIndex++;
-    activeChunks++;
-    
-    try {
-      const start = chunkIndex * CHUNK_SIZE;
-      const end = Math.min(file.size, start + CHUNK_SIZE);
-      const chunk = file.slice(start, end);
-      
-      // Track progress for this specific chunk
-      const { error } = await supabase.storage
-        .from("notes")
-        .upload(
-          `${filePath}_part${chunkIndex}`, 
-          chunk, 
-          { upsert: true }
-        );
-      
-      if (error) throw error;
-      
-      // Mark this chunk as complete
-      chunkProgress[chunkIndex] = 100;
-      updateTotalProgress();
-      
-    } catch (error) {
-      console.error(`Error uploading chunk ${chunkIndex}:`, error);
-      throw error;
-    } finally {
-      activeChunks--;
-      // Process next chunk if available
-      if (nextChunkIndex < totalChunks) {
-        chunkPromises.push(processNextChunk());
-      }
-    }
-  };
-  
-  // Initialize first batch of concurrent uploads
-  for (let i = 0; i < Math.min(MAX_CONCURRENT_CHUNKS, totalChunks); i++) {
-    chunkPromises.push(processNextChunk());
-  }
-  
-  // Wait for all chunks to upload
-  await Promise.all(chunkPromises);
-  console.log("All chunks uploaded successfully");
-  
-  // After all chunks are uploaded, combine them
-  // Note: Since Supabase doesn't provide a native way to combine chunks,
-  // we'll store info about chunks and handle it client-side
-  
-  // Upload the metadata file with info about all chunks
-  const chunksMetadata = {
-    totalChunks,
-    chunkSize: CHUNK_SIZE,
-    totalSize: file.size,
-    chunks: Array.from({ length: totalChunks }, (_, i) => `${filePath}_part${i}`),
-  };
-  
-  const { error } = await supabase.storage
-    .from("notes")
-    .upload(
-      `${filePath}_metadata.json`,
-      JSON.stringify(chunksMetadata),
-      { upsert: true }
-    );
-  
-  if (error) {
-    console.error("Error uploading chunks metadata:", error);
-    throw error;
-  }
-  
-  // For simplicity, we'll use the first chunk as the main file reference
-  const { error: renameError } = await supabase.storage
-    .from("notes")
-    .copy(`${filePath}_part0`, filePath);
-  
-  if (renameError) {
-    console.error("Error creating main file reference:", renameError);
-    throw renameError;
-  }
-  
-  console.log("Chunks successfully merged");
-  
-  // Ensure we report 100% progress at the end
-  if (onProgress) onProgress(100);
-}
-
-// Helper function for regular upload with progress tracking
-async function uploadWithProgress(filePath: string, file: File, onProgress?: (progress: number) => void): Promise<void> {
-  if (onProgress) {
-    // Start with a small progress value to show activity
-    onProgress(1);
-    
+// Helper function for direct upload with precise progress tracking
+async function uploadWithProgress(
+  filePath: string, 
+  file: File, 
+  onProgress?: (loaded: number, total: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Create and configure XHR
     const xhr = new XMLHttpRequest();
-    // Use proper URL with helper property
     const uploadUrl = `${getStorageUrl()}/object/notes/${filePath}`;
+    
     xhr.open('POST', uploadUrl);
     
-    // Add supabase headers
+    // Add Supabase headers
     const apiKey = getSupabaseKey();
     xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`);
     xhr.setRequestHeader('x-upsert', 'true');
     
-    // Set up progress event
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        const percentComplete = Math.round((e.loaded / e.total) * 100);
-        onProgress(percentComplete);
+    // Track progress events
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(event.loaded, event.total);
       }
     };
     
-    return new Promise((resolve, reject) => {
-      // Handle completion
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve();
-        } else {
-          reject(new Error(`Upload failed with status ${xhr.status}`));
-        }
-      };
-      
-      // Handle error
-      xhr.onerror = () => {
-        reject(new Error('Network error during upload'));
-      };
-      
-      // Send the file
-      const formData = new FormData();
-      formData.append('file', file);
-      xhr.send(formData);
-    });
-  } else {
-    // If no progress tracking needed, use the standard method
-    const { error } = await supabase.storage
-      .from("notes")
-      .upload(filePath, file, {
-        cacheControl: "3600",
-        upsert: true,
-      });
-      
-    if (error) {
-      console.error("Error uploading file:", error);
-      throw error;
-    }
-  }
+    // Handle completion
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        console.log("Upload completed successfully");
+        if (onProgress) onProgress(file.size, file.size); // Ensure 100% at the end
+        resolve();
+      } else {
+        reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
+      }
+    };
+    
+    // Handle errors
+    xhr.onerror = () => {
+      console.error("Network error during upload");
+      reject(new Error('Network error during upload'));
+    };
+    
+    xhr.ontimeout = () => {
+      console.error("Upload timed out");
+      reject(new Error('Upload timed out'));
+    };
+    
+    // Add more debug information
+    xhr.onabort = () => {
+      console.warn("Upload was aborted");
+      reject(new Error('Upload was aborted'));
+    };
+    
+    console.log("Starting XHR upload to:", uploadUrl);
+    
+    // Create FormData and send
+    const formData = new FormData();
+    formData.append('file', file);
+    xhr.send(formData);
+  });
 }
 
 function formatFileSize(bytes: number): string {
@@ -373,11 +257,16 @@ export async function getUserNotes(userId: string): Promise<NoteWithDetails[]> {
   return []; // Since we don't have auth, just return empty array
 }
 
-// Helper functions to safely get protected Supabase properties
+// Ensure these helper functions are available
 function getStorageUrl(): string {
   return 'https://qxmmsuakpqgcfhmngmjb.supabase.co/storage/v1';
 }
 
 function getSupabaseKey(): string {
   return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF4bW1zdWFrcHFnY2ZobW5nbWpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0ODEzNzcsImV4cCI6MjA1OTA1NzM3N30.BkT-HrDlR2HJ6iAhuaIFMD7H_jRFIu0Y9hpiSyU4EHY';
+}
+
+export function getFileUrl(filePath: string): string {
+  const { data } = supabase.storage.from("notes").getPublicUrl(filePath);
+  return data.publicUrl;
 }
