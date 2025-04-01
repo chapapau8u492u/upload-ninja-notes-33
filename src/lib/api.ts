@@ -44,77 +44,51 @@ export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[
   });
 }
 
-export async function getUserRating(noteId: string, userId: string): Promise<number | null> {
-  if (!userId) return null;
+export async function getUserRating(noteId: string, deviceId: string): Promise<number | null> {
+  if (!deviceId) return null;
   
-  // For anonymous users, we need to handle them differently since we're using
-  // localStorage IDs that are not valid UUIDs
-  if (userId.startsWith('anon_')) {
-    // Create a consistent hash from the anonymous ID and note ID
-    // This allows anonymous users to have persistent ratings per note
-    const ratingKey = `rating_${noteId}_${userId}`;
+  try {
+    const { data, error } = await supabase
+      .from("ratings")
+      .select("rating")
+      .eq("note_id", noteId)
+      .eq("user_id", deviceId)
+      .single();
+  
+    if (error) {
+      if (error.code === "PGRST116") {
+        return null; // No rating found
+      }
+      console.error("Error fetching user rating:", error);
+      throw error;
+    }
+  
+    return data?.rating || null;
+  } catch (error) {
+    console.error("Error in getUserRating:", error);
+    // If there's an error with the database, fall back to localStorage
+    const ratingKey = `rating_${noteId}_${deviceId}`;
     const savedRating = localStorage.getItem(ratingKey);
     return savedRating ? parseInt(savedRating, 10) : null;
   }
-  
-  // For authenticated users (if we add auth later)
-  const { data, error } = await supabase
-    .from("ratings")
-    .select("rating")
-    .eq("note_id", noteId)
-    .eq("user_id", userId)
-    .single();
-
-  if (error) {
-    if (error.code === "PGRST116") {
-      return null; // No rating found
-    }
-    console.error("Error fetching user rating:", error);
-    throw error;
-  }
-
-  return data?.rating || null;
 }
 
 export async function rateNote(
   noteId: string,
-  userId: string,
+  deviceId: string,
   rating: number
 ): Promise<void> {
-  // For anonymous users, store ratings in localStorage instead of the database
-  if (userId.startsWith('anon_')) {
-    const ratingKey = `rating_${noteId}_${userId}`;
-    localStorage.setItem(ratingKey, rating.toString());
-    
-    // Also update the global ratings count in localStorage
-    // Create a master list of all ratings if it doesn't exist
-    const allRatingsKey = 'all_ratings';
-    const allRatings = JSON.parse(localStorage.getItem(allRatingsKey) || '{}');
-    allRatings[noteId] = allRatings[noteId] || [];
-    
-    // Check if user already rated this note
-    const existingRatingIndex = allRatings[noteId].findIndex((r: any) => r.userId === userId);
-    
-    if (existingRatingIndex >= 0) {
-      // Update existing rating
-      allRatings[noteId][existingRatingIndex].rating = rating;
-    } else {
-      // Add new rating
-      allRatings[noteId].push({ userId, rating });
-    }
-    
-    localStorage.setItem(allRatingsKey, JSON.stringify(allRatings));
-    return;
-  }
+  // Always save to localStorage as a fallback
+  const ratingKey = `rating_${noteId}_${deviceId}`;
+  localStorage.setItem(ratingKey, rating.toString());
   
-  // For authenticated users (if we add auth later)
   try {
     // First check if there's an existing rating to avoid duplicates
     const { data: existingRating } = await supabase
       .from("ratings")
       .select("id")
       .eq("note_id", noteId)
-      .eq("user_id", userId);
+      .eq("user_id", deviceId);
       
     if (existingRating && existingRating.length > 0) {
       // Update existing rating
@@ -122,7 +96,7 @@ export async function rateNote(
         .from("ratings")
         .update({ rating })
         .eq("note_id", noteId)
-        .eq("user_id", userId);
+        .eq("user_id", deviceId);
         
       if (error) {
         console.error("Error updating rating:", error);
@@ -134,7 +108,7 @@ export async function rateNote(
         .from("ratings")
         .insert({
           note_id: noteId,
-          user_id: userId,
+          user_id: deviceId,
           rating,
         });
 
@@ -145,7 +119,9 @@ export async function rateNote(
     }
   } catch (error) {
     console.error("Error rating note:", error);
-    throw error;
+    
+    // Continue execution - the rating was already saved to localStorage
+    // so the user will still see their rating even if the database operation failed
   }
 }
 

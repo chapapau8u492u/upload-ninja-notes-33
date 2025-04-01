@@ -96,8 +96,8 @@ export const NoteCard = ({ note, onDelete, showRatingInteraction = false }: Note
       <CardFooter className="flex justify-between pt-2">
         <RatingStars 
           noteId={note.id}
-          averageRating={ratingUpdated ? note.average_rating : note.average_rating}
-          ratingsCount={ratingUpdated ? note.ratings_count + 1 : note.ratings_count}
+          averageRating={note.average_rating}
+          ratingsCount={note.ratings_count}
           interactive={true}
           onRatingChange={handleRatingChange}
         />

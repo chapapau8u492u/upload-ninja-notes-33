@@ -33,20 +33,19 @@ export const RatingStars = ({
     if (interactive) {
       const loadUserRating = async () => {
         try {
-          // Generate a unique ID for anonymous users
-          const anonymousId = localStorage.getItem('anonymous_user_id') || 
-            `anon_${Math.random().toString(36).substring(2, 15)}`;
+          // Generate a device ID for the current device
+          const deviceId = localStorage.getItem('device_id') || 
+            `device_${Math.random().toString(36).substring(2, 15)}`;
           
           // Store the ID in localStorage for future use
-          if (!localStorage.getItem('anonymous_user_id')) {
-            localStorage.setItem('anonymous_user_id', anonymousId);
+          if (!localStorage.getItem('device_id')) {
+            localStorage.setItem('device_id', deviceId);
           }
           
           // Check if user has already rated this note
-          const ratingKey = `rating_${noteId}_${anonymousId}`;
-          const savedRating = localStorage.getItem(ratingKey);
-          if (savedRating) {
-            setRating(parseInt(savedRating, 10));
+          const userRating = await getUserRating(noteId, deviceId);
+          if (userRating !== null) {
+            setRating(userRating);
           }
         } catch (error) {
           console.error("Error loading user rating:", error);
@@ -62,16 +61,16 @@ export const RatingStars = ({
 
     try {
       setIsLoading(true);
-      // Generate a unique ID for anonymous users
-      const anonymousId = localStorage.getItem('anonymous_user_id') || 
-        `anon_${Math.random().toString(36).substring(2, 15)}`;
+      // Get the device ID
+      const deviceId = localStorage.getItem('device_id') || 
+        `device_${Math.random().toString(36).substring(2, 15)}`;
       
       // Store the ID in localStorage for future use
-      if (!localStorage.getItem('anonymous_user_id')) {
-        localStorage.setItem('anonymous_user_id', anonymousId);
+      if (!localStorage.getItem('device_id')) {
+        localStorage.setItem('device_id', deviceId);
       }
       
-      await rateNote(noteId, anonymousId, newRating);
+      await rateNote(noteId, deviceId, newRating);
       setRating(newRating);
       
       if (onRatingChange) {
