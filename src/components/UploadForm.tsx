@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { uploadNote } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
-import { FileUp, Loader2, FileText, Upload } from "lucide-react";
+import { FileUp, FileText, Upload } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 

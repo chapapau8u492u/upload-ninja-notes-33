@@ -1,9 +1,8 @@
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Star } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getUserRating, rateNote } from "@/lib/api";
-import { useAuth } from "@/context/AuthContext";
+import { rateNote } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 
 interface RatingStarsProps {
@@ -23,43 +22,19 @@ export const RatingStars = ({
   className,
   onRatingChange,
 }: RatingStarsProps) => {
-  const { user } = useAuth();
   const [rating, setRating] = useState<number | null>(null);
   const [hoveredRating, setHoveredRating] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const displayRating = hoveredRating ?? rating ?? averageRating ?? 0;
 
-  useEffect(() => {
-    if (user && interactive) {
-      const fetchUserRating = async () => {
-        try {
-          const userRating = await getUserRating(noteId, user.id);
-          setRating(userRating);
-        } catch (error) {
-          console.error("Error fetching user rating:", error);
-        }
-      };
-      
-      fetchUserRating();
-    }
-  }, [noteId, user, interactive]);
-
   const handleRating = async (newRating: number) => {
-    if (!user) {
-      toast({
-        title: "Authentication required",
-        description: "Please log in to rate notes",
-        variant: "destructive",
-      });
-      return;
-    }
-
     if (!interactive) return;
 
     try {
       setIsLoading(true);
-      await rateNote(noteId, user.id, newRating);
+      // Use anonymous ratings instead of user-based
+      await rateNote(noteId, "anonymous", newRating);
       setRating(newRating);
       
       if (onRatingChange) {

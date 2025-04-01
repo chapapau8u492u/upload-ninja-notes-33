@@ -1,7 +1,6 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { Note, NoteWithDetails, Rating } from "@/types";
-import { Database } from "@/integrations/supabase/types";
 
 export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[]> {
   let query = supabase
@@ -63,38 +62,18 @@ export async function rateNote(
   userId: string,
   rating: number
 ): Promise<void> {
-  if (!userId) {
-    throw new Error("You must be logged in to rate notes");
-  }
-  
-  const existingRating = await getUserRating(noteId, userId);
-  
-  if (existingRating) {
-    // Update existing rating
-    const { error } = await supabase
-      .from("ratings")
-      .update({ rating })
-      .eq("note_id", noteId)
-      .eq("user_id", userId);
+  // Insert new rating
+  const { error } = await supabase
+    .from("ratings")
+    .insert({
+      note_id: noteId,
+      user_id: userId,
+      rating,
+    });
 
-    if (error) {
-      console.error("Error updating rating:", error);
-      throw error;
-    }
-  } else {
-    // Insert new rating
-    const { error } = await supabase
-      .from("ratings")
-      .insert({
-        note_id: noteId,
-        user_id: userId,
-        rating,
-      });
-
-    if (error) {
-      console.error("Error inserting rating:", error);
-      throw error;
-    }
+  if (error) {
+    console.error("Error inserting rating:", error);
+    throw error;
   }
 }
 
@@ -108,8 +87,8 @@ export async function uploadNote(
   console.log("Starting file upload:", { title, fileName: file.name });
   const fileName = `${Date.now()}_${file.name}`;
   
-  // Create folder path - if user is logged in, use their ID as folder, otherwise use 'anonymous'
-  const folderName = userId || 'anonymous';
+  // Create folder path - always use 'anonymous' since we don't have auth
+  const folderName = 'anonymous';
   const filePath = `${folderName}/${fileName}`;
 
   // 1. Upload the file to storage with progress tracking
@@ -149,7 +128,7 @@ export async function uploadNote(
       file_type: fileType,
       file_size: fileSize,
       file_name: file.name,
-      uploader_id: userId,
+      uploader_id: null, // Always null since we don't use auth
     });
 
   if (insertError) {
@@ -205,32 +184,5 @@ export function getFileUrl(filePath: string): string {
 }
 
 export async function getUserNotes(userId: string): Promise<NoteWithDetails[]> {
-  if (!userId) return [];
-  
-  const { data, error } = await supabase
-    .from("notes")
-    .select(`
-      *,
-      ratings(rating)
-    `)
-    .eq("uploader_id", userId)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    console.error("Error fetching user notes:", error);
-    throw error;
-  }
-
-  return (data || []).map((note: any) => {
-    const ratings = note.ratings || [];
-    const ratingsSum = ratings.reduce((sum: number, r: any) => sum + r.rating, 0);
-    const averageRating = ratings.length > 0 ? ratingsSum / ratings.length : null;
-
-    return {
-      ...note,
-      profile: note.profile || { username: "Anonymous User" },
-      average_rating: averageRating,
-      ratings_count: ratings.length,
-    };
-  });
+  return []; // Since we don't have auth, just return empty array
 }

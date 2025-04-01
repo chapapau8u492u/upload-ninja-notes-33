@@ -104,10 +104,6 @@ const Index = () => {
             <h2 className="text-2xl font-bold">
               {searchQuery ? "Search Results" : "All Notes"}
             </h2>
-            <Button onClick={() => navigate("/upload")} className="flex items-center gap-2">
-              <Upload className="h-4 w-4" />
-              Upload Note
-            </Button>
           </div>
           
           {isLoading ? (
