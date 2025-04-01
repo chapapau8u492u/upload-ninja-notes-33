@@ -248,6 +248,7 @@ export async function deleteNote(note: Note): Promise<void> {
   }
 }
 
+// Define getFileUrl function only once
 export function getFileUrl(filePath: string): string {
   const { data } = supabase.storage.from("notes").getPublicUrl(filePath);
   return data.publicUrl;
@@ -257,16 +258,11 @@ export async function getUserNotes(userId: string): Promise<NoteWithDetails[]> {
   return []; // Since we don't have auth, just return empty array
 }
 
-// Ensure these helper functions are available
+// Helper functions for upload
 function getStorageUrl(): string {
   return 'https://qxmmsuakpqgcfhmngmjb.supabase.co/storage/v1';
 }
 
 function getSupabaseKey(): string {
   return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF4bW1zdWFrcHFnY2ZobW5nbWpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0ODEzNzcsImV4cCI6MjA1OTA1NzM3N30.BkT-HrDlR2HJ6iAhuaIFMD7H_jRFIu0Y9hpiSyU4EHY';
-}
-
-export function getFileUrl(filePath: string): string {
-  const { data } = supabase.storage.from("notes").getPublicUrl(filePath);
-  return data.publicUrl;
 }
