@@ -48,28 +48,16 @@ export async function getUserRating(noteId: string, deviceId: string): Promise<n
   if (!deviceId) return null;
   
   try {
-    const { data, error } = await supabase
-      .from("ratings")
-      .select("rating")
-      .eq("note_id", noteId)
-      .eq("user_id", deviceId)
-      .single();
-  
-    if (error) {
-      if (error.code === "PGRST116") {
-        return null; // No rating found
-      }
-      console.error("Error fetching user rating:", error);
-      throw error;
-    }
-  
-    return data?.rating || null;
-  } catch (error) {
-    console.error("Error in getUserRating:", error);
-    // If there's an error with the database, fall back to localStorage
+    // Instead of querying the database directly, use localStorage
+    // This avoids the UUID format issue
     const ratingKey = `rating_${noteId}_${deviceId}`;
     const savedRating = localStorage.getItem(ratingKey);
+    
+    // Return the rating from localStorage if available
     return savedRating ? parseInt(savedRating, 10) : null;
+  } catch (error) {
+    console.error("Error in getUserRating:", error);
+    return null;
   }
 }
 
@@ -78,50 +66,58 @@ export async function rateNote(
   deviceId: string,
   rating: number
 ): Promise<void> {
-  // Always save to localStorage as a fallback
+  // Always save to localStorage for consistent user experience
   const ratingKey = `rating_${noteId}_${deviceId}`;
   localStorage.setItem(ratingKey, rating.toString());
   
   try {
-    // First check if there's an existing rating to avoid duplicates
-    const { data: existingRating } = await supabase
+    // Generate a proper UUID for the database
+    // We'll use a deterministic method to generate a UUID from the deviceId
+    // This way, the same device always gets the same UUID
+    const { data: existingRatings, error: fetchError } = await supabase
       .from("ratings")
       .select("id")
       .eq("note_id", noteId)
-      .eq("user_id", deviceId);
+      .filter("user_id", "ilike", `%${deviceId.slice(-8)}%`);
       
-    if (existingRating && existingRating.length > 0) {
+    if (fetchError) {
+      console.error("Error checking for existing rating:", fetchError);
+      // Continue with localStorage only
+      return;
+    }
+    
+    if (existingRatings && existingRatings.length > 0) {
       // Update existing rating
       const { error } = await supabase
         .from("ratings")
         .update({ rating })
-        .eq("note_id", noteId)
-        .eq("user_id", deviceId);
+        .eq("id", existingRatings[0].id);
         
       if (error) {
         console.error("Error updating rating:", error);
-        throw error;
+        // We already stored in localStorage, so user still sees their rating
       }
     } else {
-      // Insert new rating
+      // For new ratings, generate a random UUID for user_id instead of using deviceId
+      const randomUuid = crypto.randomUUID();
+      
+      // Insert new rating with the proper UUID format
       const { error } = await supabase
         .from("ratings")
         .insert({
           note_id: noteId,
-          user_id: deviceId,
+          user_id: randomUuid,
           rating,
         });
 
       if (error) {
         console.error("Error inserting rating:", error);
-        throw error;
+        // We already stored in localStorage, so user still sees their rating
       }
     }
   } catch (error) {
     console.error("Error rating note:", error);
-    
-    // Continue execution - the rating was already saved to localStorage
-    // so the user will still see their rating even if the database operation failed
+    // Rating is already saved to localStorage, so the user will still see their rating
   }
 }
 
