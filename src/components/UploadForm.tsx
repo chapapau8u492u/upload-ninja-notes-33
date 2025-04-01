@@ -32,6 +32,12 @@ const uploadFormSchema = z.object({
 
 type UploadFormValues = z.infer<typeof uploadFormSchema>;
 
+// Create a type for the raw form values (before transformations)
+type RawUploadFormValues = {
+  title: string;
+  file: FileList;
+};
+
 interface UploadFormProps {
   onSuccess?: () => void;
 }
@@ -140,8 +146,8 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       setSelectedFile(files[0]);
-      // Fix: Pass files directly as FileList without typecasting
-      form.setValue("file", files, { shouldValidate: true });
+      // Fix: Use type assertion to inform TypeScript about the expected type
+      form.setValue("file", files as unknown as any, { shouldValidate: true });
     } else {
       setSelectedFile(null);
     }
