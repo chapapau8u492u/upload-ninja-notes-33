@@ -201,6 +201,21 @@ export async function uploadNote(
   console.log("Note record created successfully");
 }
 
+export async function updateNote(
+  noteId: string, 
+  updates: { title?: string }
+) {
+  const { error } = await supabase
+    .from('notes')
+    .update(updates)
+    .eq('id', noteId);
+
+  if (error) {
+    console.error('Error updating note:', error);
+    throw error;
+  }
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 Bytes';
   
