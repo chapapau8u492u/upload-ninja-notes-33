@@ -140,7 +140,8 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       setSelectedFile(files[0]);
-      form.setValue("file", files as unknown as FileList, { shouldValidate: true });
+      // Fix: Pass files directly as FileList without typecasting
+      form.setValue("file", files, { shouldValidate: true });
     } else {
       setSelectedFile(null);
     }
