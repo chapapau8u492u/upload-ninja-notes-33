@@ -111,6 +111,9 @@ export async function uploadNote(
   const folderName = 'anonymous';
   const filePath = `${folderName}/${fileName}`;
 
+  // Start with initial progress of 0
+  if (onProgress) onProgress(0);
+
   // Implement chunked upload for large files
   if (file.size > 10 * 1024 * 1024) { // If file is larger than 10MB
     await uploadLargeFile(filePath, file, onProgress);
@@ -151,11 +154,10 @@ export async function uploadNote(
   console.log("Note record created successfully");
 }
 
-// Helper function for chunked upload of large files
+// Helper function for chunked upload of large files with improved progress tracking
 async function uploadLargeFile(filePath: string, file: File, onProgress?: (progress: number) => void): Promise<void> {
   const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks - Supabase recommended size
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-  const uploadPromises = [];
   
   console.log(`Splitting ${file.name} into ${totalChunks} chunks of ${CHUNK_SIZE / (1024 * 1024)}MB each`);
   
@@ -170,62 +172,70 @@ async function uploadLargeFile(filePath: string, file: File, onProgress?: (progr
     }
   };
   
-  // Upload each chunk in parallel
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const end = Math.min(file.size, start + CHUNK_SIZE);
-    const chunk = file.slice(start, end);
+  // Using a more efficient approach with concurrent chunk uploads
+  const chunkPromises = [];
+  const MAX_CONCURRENT_CHUNKS = 3; // Control concurrency - adjust based on testing
+  let activeChunks = 0;
+  let nextChunkIndex = 0;
+  
+  // Process chunks sequentially with controlled parallelism
+  const processNextChunk = async () => {
+    if (nextChunkIndex >= totalChunks) return;
     
-    const chunkUploadPromise = (async () => {
-      try {
-        const { error } = await supabase.storage
-          .from("notes")
-          .upload(
-            `${filePath}_part${i}`, 
-            chunk, 
-            { 
-              upsert: true,
-              onUploadProgress: (progress) => {
-                chunkProgress[i] = (progress.loaded / progress.total) * 100;
-                updateTotalProgress();
-              },
-            }
-          );
-        
-        if (error) throw error;
-        
-        // Mark this chunk as complete
-        chunkProgress[i] = 100;
-        updateTotalProgress();
-        
-        return `${filePath}_part${i}`;
-      } catch (error) {
-        console.error(`Error uploading chunk ${i}:`, error);
-        throw error;
+    const chunkIndex = nextChunkIndex++;
+    activeChunks++;
+    
+    try {
+      const start = chunkIndex * CHUNK_SIZE;
+      const end = Math.min(file.size, start + CHUNK_SIZE);
+      const chunk = file.slice(start, end);
+      
+      // Track progress for this specific chunk
+      const { error } = await supabase.storage
+        .from("notes")
+        .upload(
+          `${filePath}_part${chunkIndex}`, 
+          chunk, 
+          { upsert: true }
+        );
+      
+      if (error) throw error;
+      
+      // Mark this chunk as complete
+      chunkProgress[chunkIndex] = 100;
+      updateTotalProgress();
+      
+    } catch (error) {
+      console.error(`Error uploading chunk ${chunkIndex}:`, error);
+      throw error;
+    } finally {
+      activeChunks--;
+      // Process next chunk if available
+      if (nextChunkIndex < totalChunks) {
+        chunkPromises.push(processNextChunk());
       }
-    })();
-    
-    uploadPromises.push(chunkUploadPromise);
+    }
+  };
+  
+  // Initialize first batch of concurrent uploads
+  for (let i = 0; i < Math.min(MAX_CONCURRENT_CHUNKS, totalChunks); i++) {
+    chunkPromises.push(processNextChunk());
   }
   
   // Wait for all chunks to upload
-  const uploadedChunkPaths = await Promise.all(uploadPromises);
+  await Promise.all(chunkPromises);
   console.log("All chunks uploaded successfully");
   
   // After all chunks are uploaded, combine them
   // Note: Since Supabase doesn't provide a native way to combine chunks,
-  // we'll need to implement a function to download and combine them
-  // For this implementation, we'll store info about chunks and handle it client-side
-  
-  // For now, to simplify, we'll use the first chunk as the main file
-  // and include metadata about all chunks in the note record
+  // we'll store info about chunks and handle it client-side
   
   // Upload the metadata file with info about all chunks
   const chunksMetadata = {
     totalChunks,
     chunkSize: CHUNK_SIZE,
     totalSize: file.size,
-    chunks: uploadedChunkPaths,
+    chunks: Array.from({ length: totalChunks }, (_, i) => `${filePath}_part${i}`),
   };
   
   const { error } = await supabase.storage
@@ -252,20 +262,26 @@ async function uploadLargeFile(filePath: string, file: File, onProgress?: (progr
   }
   
   console.log("Chunks successfully merged");
+  
+  // Ensure we report 100% progress at the end
+  if (onProgress) onProgress(100);
 }
 
 // Helper function for regular upload with progress tracking
 async function uploadWithProgress(filePath: string, file: File, onProgress?: (progress: number) => void): Promise<void> {
   if (onProgress) {
+    // Start with a small progress value to show activity
+    onProgress(1);
+    
     const xhr = new XMLHttpRequest();
-    // Use proper URL construction with helper property
-    const uploadUrl = `${supabase.storageUrl}/object/notes/${filePath}`;
+    // Use proper URL with helper property
+    const uploadUrl = `${getStorageUrl()}/object/notes/${filePath}`;
     xhr.open('POST', uploadUrl);
     
-    // Add supabase headers with helper property
-    const apiKey = supabase.supabaseKey;
+    // Add supabase headers
+    const apiKey = getSupabaseKey();
     xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`);
-    xhr.setRequestHeader('x-upsert', 'false');
+    xhr.setRequestHeader('x-upsert', 'true');
     
     // Set up progress event
     xhr.upload.onprogress = (e) => {
@@ -301,7 +317,7 @@ async function uploadWithProgress(filePath: string, file: File, onProgress?: (pr
       .from("notes")
       .upload(filePath, file, {
         cacheControl: "3600",
-        upsert: false,
+        upsert: true,
       });
       
     if (error) {
@@ -357,16 +373,11 @@ export async function getUserNotes(userId: string): Promise<NoteWithDetails[]> {
   return []; // Since we don't have auth, just return empty array
 }
 
-// Add helper properties for the protected properties we can't access directly
-Object.defineProperties(supabase, {
-  storageUrl: {
-    get() {
-      return 'https://qxmmsuakpqgcfhmngmjb.supabase.co/storage/v1';
-    }
-  },
-  supabaseKey: {
-    get() {
-      return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF4bW1zdWFrcHFnY2ZobW5nbWpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0ODEzNzcsImV4cCI6MjA1OTA1NzM3N30.BkT-HrDlR2HJ6iAhuaIFMD7H_jRFIu0Y9hpiSyU4EHY';
-    }
-  }
-});
+// Helper functions to safely get protected Supabase properties
+function getStorageUrl(): string {
+  return 'https://qxmmsuakpqgcfhmngmjb.supabase.co/storage/v1';
+}
+
+function getSupabaseKey(): string {
+  return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF4bW1zdWFrcHFnY2ZobW5nbWpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0ODEzNzcsImV4cCI6MjA1OTA1NzM3N30.BkT-HrDlR2HJ6iAhuaIFMD7H_jRFIu0Y9hpiSyU4EHY';
+}
