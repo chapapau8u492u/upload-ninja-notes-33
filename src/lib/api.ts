@@ -112,22 +112,55 @@ export async function uploadNote(
   const folderName = 'anonymous';
   const filePath = `${folderName}/${fileName}`;
 
-  // 1. Upload the file to storage with progress tracking
-  const { error: uploadError, data } = await supabase.storage
-    .from("notes")
-    .upload(filePath, file, {
-      cacheControl: "3600",
-      upsert: false,
-      // Progress tracking needs to use the progress event
-      onUploadProgress: (progressEvent) => {
-        if (progressEvent.total) {
-          const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
-          if (onProgress) {
-            onProgress(percent);
-          }
+  // 1. Upload the file to storage
+  // Use XMLHttpRequest for progress tracking instead of the built-in upload progress
+  const { error: uploadError, data } = await new Promise<{error: any, data: any}>((resolve) => {
+    // Set up progress tracking with XMLHttpRequest
+    if (onProgress) {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${supabase.storage.url}/object/notes/${filePath}`);
+      
+      // Add supabase headers
+      xhr.setRequestHeader('Authorization', `Bearer ${supabase.supabaseKey}`);
+      xhr.setRequestHeader('x-upsert', 'false');
+      
+      // Set up progress event
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percentComplete = Math.round((e.loaded / e.total) * 100);
+          onProgress(percentComplete);
         }
-      },
-    });
+      };
+      
+      // Handle completion
+      xhr.onload = async () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve({ error: null, data: { path: filePath } });
+        } else {
+          resolve({ error: new Error(`Upload failed with status ${xhr.status}`), data: null });
+        }
+      };
+      
+      // Handle error
+      xhr.onerror = () => {
+        resolve({ error: new Error('Network error during upload'), data: null });
+      };
+      
+      // Send the file
+      const formData = new FormData();
+      formData.append('file', file);
+      xhr.send(formData);
+    } else {
+      // If no progress tracking needed, use the standard method
+      supabase.storage
+        .from("notes")
+        .upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+        })
+        .then(result => resolve(result));
+    }
+  });
 
   if (uploadError) {
     console.error("Error uploading file:", uploadError);

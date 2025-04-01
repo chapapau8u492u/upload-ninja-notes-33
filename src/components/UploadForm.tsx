@@ -94,7 +94,8 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       setSelectedFile(files[0]);
-      form.setValue("file", files as unknown as FileList);
+      // Fix: Don't set the entire FileList, but instead get the first file
+      form.setValue("file", files as unknown as FileList, { shouldValidate: true });
     } else {
       setSelectedFile(null);
     }
