@@ -1,8 +1,8 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Star } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { rateNote } from "@/lib/api";
+import { rateNote, getUserRating } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 
 interface RatingStarsProps {
@@ -27,6 +27,35 @@ export const RatingStars = ({
   const [isLoading, setIsLoading] = useState(false);
 
   const displayRating = hoveredRating ?? rating ?? averageRating ?? 0;
+
+  // Get user's existing rating if they've rated before
+  useEffect(() => {
+    if (interactive) {
+      const loadUserRating = async () => {
+        try {
+          // Generate a unique ID for anonymous users
+          const anonymousId = localStorage.getItem('anonymous_user_id') || 
+            `anon_${Math.random().toString(36).substring(2, 15)}`;
+          
+          // Store the ID in localStorage for future use
+          if (!localStorage.getItem('anonymous_user_id')) {
+            localStorage.setItem('anonymous_user_id', anonymousId);
+          }
+          
+          // Check if user has already rated this note
+          const ratingKey = `rating_${noteId}_${anonymousId}`;
+          const savedRating = localStorage.getItem(ratingKey);
+          if (savedRating) {
+            setRating(parseInt(savedRating, 10));
+          }
+        } catch (error) {
+          console.error("Error loading user rating:", error);
+        }
+      };
+      
+      loadUserRating();
+    }
+  }, [interactive, noteId]);
 
   const handleRating = async (newRating: number) => {
     if (!interactive) return;

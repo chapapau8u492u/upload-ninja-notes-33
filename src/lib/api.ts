@@ -21,7 +21,8 @@ export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[
     throw error;
   }
 
-  return (data || []).map((note: any) => {
+  // Map and calculate average ratings
+  const notesWithRatings = (data || []).map((note: any) => {
     const ratings = note.ratings || [];
     const ratingsSum = ratings.reduce((sum: number, r: any) => sum + r.rating, 0);
     const averageRating = ratings.length > 0 ? ratingsSum / ratings.length : null;
@@ -33,11 +34,30 @@ export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[
       ratings_count: ratings.length,
     };
   });
+
+  // Sort by average rating (highest first), with null ratings at the end
+  return notesWithRatings.sort((a, b) => {
+    if (a.average_rating === null && b.average_rating === null) return 0;
+    if (a.average_rating === null) return 1;
+    if (b.average_rating === null) return -1;
+    return b.average_rating - a.average_rating;
+  });
 }
 
 export async function getUserRating(noteId: string, userId: string): Promise<number | null> {
   if (!userId) return null;
   
+  // For anonymous users, we need to handle them differently since we're using
+  // localStorage IDs that are not valid UUIDs
+  if (userId.startsWith('anon_')) {
+    // Create a consistent hash from the anonymous ID and note ID
+    // This allows anonymous users to have persistent ratings per note
+    const ratingKey = `rating_${noteId}_${userId}`;
+    const savedRating = localStorage.getItem(ratingKey);
+    return savedRating ? parseInt(savedRating, 10) : null;
+  }
+  
+  // For authenticated users (if we add auth later)
   const { data, error } = await supabase
     .from("ratings")
     .select("rating")
@@ -61,39 +81,71 @@ export async function rateNote(
   userId: string,
   rating: number
 ): Promise<void> {
-  // First check if there's an existing rating to avoid duplicates
-  const { data: existingRating } = await supabase
-    .from("ratings")
-    .select("id")
-    .eq("note_id", noteId)
-    .eq("user_id", userId);
+  // For anonymous users, store ratings in localStorage instead of the database
+  if (userId.startsWith('anon_')) {
+    const ratingKey = `rating_${noteId}_${userId}`;
+    localStorage.setItem(ratingKey, rating.toString());
     
-  if (existingRating && existingRating.length > 0) {
-    // Update existing rating
-    const { error } = await supabase
+    // Also update the global ratings count in localStorage
+    // Create a master list of all ratings if it doesn't exist
+    const allRatingsKey = 'all_ratings';
+    const allRatings = JSON.parse(localStorage.getItem(allRatingsKey) || '{}');
+    allRatings[noteId] = allRatings[noteId] || [];
+    
+    // Check if user already rated this note
+    const existingRatingIndex = allRatings[noteId].findIndex((r: any) => r.userId === userId);
+    
+    if (existingRatingIndex >= 0) {
+      // Update existing rating
+      allRatings[noteId][existingRatingIndex].rating = rating;
+    } else {
+      // Add new rating
+      allRatings[noteId].push({ userId, rating });
+    }
+    
+    localStorage.setItem(allRatingsKey, JSON.stringify(allRatings));
+    return;
+  }
+  
+  // For authenticated users (if we add auth later)
+  try {
+    // First check if there's an existing rating to avoid duplicates
+    const { data: existingRating } = await supabase
       .from("ratings")
-      .update({ rating })
+      .select("id")
       .eq("note_id", noteId)
       .eq("user_id", userId);
       
-    if (error) {
-      console.error("Error updating rating:", error);
-      throw error;
-    }
-  } else {
-    // Insert new rating
-    const { error } = await supabase
-      .from("ratings")
-      .insert({
-        note_id: noteId,
-        user_id: userId,
-        rating,
-      });
+    if (existingRating && existingRating.length > 0) {
+      // Update existing rating
+      const { error } = await supabase
+        .from("ratings")
+        .update({ rating })
+        .eq("note_id", noteId)
+        .eq("user_id", userId);
+        
+      if (error) {
+        console.error("Error updating rating:", error);
+        throw error;
+      }
+    } else {
+      // Insert new rating
+      const { error } = await supabase
+        .from("ratings")
+        .insert({
+          note_id: noteId,
+          user_id: userId,
+          rating,
+        });
 
-    if (error) {
-      console.error("Error inserting rating:", error);
-      throw error;
+      if (error) {
+        console.error("Error inserting rating:", error);
+        throw error;
+      }
     }
+  } catch (error) {
+    console.error("Error rating note:", error);
+    throw error;
   }
 }
 

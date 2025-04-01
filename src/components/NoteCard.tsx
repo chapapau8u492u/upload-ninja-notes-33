@@ -2,11 +2,12 @@
 import { useState } from "react";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, Star } from "lucide-react";
 import { NoteWithDetails } from "@/types";
 import { RatingStars } from "./RatingStars";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
 
 interface NoteCardProps {
   note: NoteWithDetails;
@@ -53,10 +54,27 @@ export const NoteCard = ({ note, onDelete, showRatingInteraction = false }: Note
     uploadedDate = "Unknown date";
   }
   
+  // Format rating badge color based on rating
+  const getRatingColor = (rating: number | null) => {
+    if (rating === null) return "bg-gray-200 text-gray-700";
+    if (rating >= 4) return "bg-green-100 text-green-800";
+    if (rating >= 3) return "bg-blue-100 text-blue-800";
+    if (rating >= 2) return "bg-yellow-100 text-yellow-800";
+    return "bg-red-100 text-red-800";
+  };
+  
   return (
     <Card className="w-full overflow-hidden">
       <CardHeader className="pb-2">
-        <CardTitle className="text-lg font-bold line-clamp-1">{note.title}</CardTitle>
+        <div className="flex justify-between items-start">
+          <CardTitle className="text-lg font-bold line-clamp-1">{note.title}</CardTitle>
+          {note.average_rating !== null && (
+            <Badge variant="outline" className={`flex items-center gap-1 ${getRatingColor(note.average_rating)}`}>
+              <Star className="h-3 w-3 fill-current" />
+              <span>{note.average_rating.toFixed(1)}</span>
+            </Badge>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="pb-2">
         {note.description && (
