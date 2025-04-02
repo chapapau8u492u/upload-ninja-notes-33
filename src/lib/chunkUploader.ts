@@ -101,12 +101,18 @@ export async function storeChunkMetadata(metadata: ChunkMetadata): Promise<void>
   if (error) {
     throw new Error(`Failed to store metadata: ${error.message}`);
   }
+  
+  // After storing the metadata in storage, create a database record
+  await createFileReassemblyRecord(
+    metadata.fileName,
+    `${getStorageUrl()}/object/notes/chunked/${metadata.uploadId}/${encodeURIComponent(metadata.fileName)}`,
+    metadata.uploadId,
+    metadata.totalChunks
+  );
 }
 
 /**
- * Create a server-side function that will handle the file download
- * This is a placeholder - in a real implementation, we'd need to create
- * a Supabase Edge Function to handle this.
+ * Create a database record to track the chunked file
  */
 export async function createFileReassemblyRecord(
   fileName: string,
@@ -127,6 +133,7 @@ export async function createFileReassemblyRecord(
     });
     
   if (error) {
+    console.error("Error creating reassembly record:", error);
     throw new Error(`Failed to create reassembly record: ${error.message}`);
   }
 }

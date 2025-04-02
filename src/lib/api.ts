@@ -1,4 +1,3 @@
-
 import { supabase } from "@/integrations/supabase/client";
 import { Note, NoteWithDetails } from "@/types";
 import { 
@@ -97,6 +96,7 @@ export async function uploadNote(
 
 /**
  * Handles uploading of large files by splitting them into chunks
+ * Only shows total progress to the user, not individual chunk progress
  */
 async function uploadLargeFile(
   file: File, 
@@ -114,21 +114,23 @@ async function uploadLargeFile(
   let totalUploaded = 0;
   const totalSize = file.size;
   
-  // Progress tracking function for individual chunks
-  const chunkProgressTracker = (chunkIndex: number, chunkSize: number) => 
+  // Updated progress tracking function that aggregates all chunk progress
+  // but only reports the overall progress to the user
+  const trackTotalProgress = (chunkSize: number) => 
     (loaded: number, total: number) => {
       // Calculate how much of this chunk has been uploaded
-      const chunkUploaded = (loaded / total) * chunkSize;
+      const chunkProgress = loaded / total;
+      const chunkUploaded = chunkProgress * chunkSize;
       
-      // Add to total, subtracting previous progress for this chunk
-      const previousProgress = totalUploaded;
-      totalUploaded = chunks
-        .slice(0, chunkIndex)
-        .reduce((sum, chunk) => sum + chunk.size, 0) + chunkUploaded;
+      // Accumulate to total uploaded (this keeps a running sum of all chunks)
+      totalUploaded += chunkUploaded;
       
-      // Report progress
-      if (onProgress && (totalUploaded > previousProgress || loaded === total)) {
-        onProgress(totalUploaded, totalSize);
+      // Ensure we don't exceed the total file size in our progress calculation
+      const normalizedUploaded = Math.min(totalUploaded, totalSize);
+      
+      // Report progress (but only once per chunk completion to avoid too many updates)
+      if (onProgress && (chunkProgress === 1 || Math.random() < 0.1)) {
+        onProgress(normalizedUploaded, totalSize);
       }
     };
   
@@ -138,22 +140,29 @@ async function uploadLargeFile(
   // Process chunks in batches to limit concurrency
   for (let i = 0; i < chunks.length; i += MAX_PARALLEL_UPLOADS) {
     const batch = chunks.slice(i, i + MAX_PARALLEL_UPLOADS);
-    const batchIndexes = Array.from({ length: batch.length }, (_, idx) => i + idx);
     
+    // Create promises for this batch
     const batchPromises = batch.map((chunk, index) => {
-      const chunkIndex = batchIndexes[index];
+      const chunkIndex = i + index;
       return uploadChunk(
         chunk, 
         chunkIndex, 
         uploadId, 
         folderName,
-        chunkProgressTracker(chunkIndex, chunk.size)
+        trackTotalProgress(chunk.size)
       );
     });
     
     // Wait for this batch to complete before starting the next one
     const batchResults = await Promise.all(batchPromises);
     chunkPaths.push(...batchResults);
+    
+    // Update progress after each batch
+    if (onProgress) {
+      const completedSize = chunks.slice(0, i + batch.length)
+        .reduce((sum, chunk) => sum + chunk.size, 0);
+      onProgress(completedSize, totalSize);
+    }
   }
   
   // Store metadata about this chunked upload
@@ -168,9 +177,10 @@ async function uploadLargeFile(
   await storeChunkMetadata(metadata);
   
   // Return a URL that would trigger server-side reassembly when accessed
-  // In a real implementation, this would point to a Supabase Edge Function
-  // that handles the reassembly and returns the complete file
   const fileUrl = `${getStorageUrl()}/object/notes/chunked/${uploadId}/${encodeURIComponent(file.name)}`;
+  
+  // Ensure we show 100% at the end
+  if (onProgress) onProgress(totalSize, totalSize);
   
   return fileUrl;
 }

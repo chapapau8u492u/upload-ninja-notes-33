@@ -1,4 +1,3 @@
-
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Download, FileText } from "lucide-react";
@@ -23,13 +22,8 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
         // For chunked files, we need to handle the download differently
         handleChunkedFileDownload();
       } else {
-        // For regular files, proceed with the direct download
-        const link = document.createElement("a");
-        link.href = fileUrl;
-        link.download = note.file_name;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // For regular files, open in a new tab
+        window.open(fileUrl, '_blank');
       }
     } catch (error) {
       console.error("Error downloading file:", error);
@@ -60,13 +54,8 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
       // the reassembly of chunks. For now, we'll simulate a successful download
       // after a short delay.
       setTimeout(() => {
-        // Create a link to download the file
-        const link = document.createElement("a");
-        link.href = fileUrl;
-        link.download = note.file_name;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // Create a link to download the file in a new tab
+        window.open(fileUrl, '_blank');
         
         toast({
           title: "Download started",

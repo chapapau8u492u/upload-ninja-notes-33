@@ -9,6 +9,39 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      chunked_files: {
+        Row: {
+          created_at: string | null
+          file_name: string
+          id: string
+          is_processed: boolean | null
+          reassembled_url: string | null
+          total_chunks: number
+          updated_at: string | null
+          upload_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          file_name: string
+          id?: string
+          is_processed?: boolean | null
+          reassembled_url?: string | null
+          total_chunks: number
+          updated_at?: string | null
+          upload_id: string
+        }
+        Update: {
+          created_at?: string | null
+          file_name?: string
+          id?: string
+          is_processed?: boolean | null
+          reassembled_url?: string | null
+          total_chunks?: number
+          updated_at?: string | null
+          upload_id?: string
+        }
+        Relationships: []
+      }
       notes: {
         Row: {
           created_at: string | null
