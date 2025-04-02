@@ -1,7 +1,6 @@
-
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, Scissors } from "lucide-react";
 import { NoteWithDetails } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
@@ -13,6 +12,7 @@ interface NoteCardProps {
 
 export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
   const fileUrl = note.file_url;
+  const isCompressed = note.title?.includes('[compressed]');
   
   const handleDownload = () => {
     try {
@@ -41,14 +41,30 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
     uploadedDate = "Unknown date";
   }
   
+  // Clean up the title by removing prefixes
+  let displayTitle = note.title || '';
+  
+  // Remove chunked prefix
+  if (displayTitle.startsWith('[chunked:')) {
+    displayTitle = displayTitle.replace(/\[chunked:.*?\]\s*/, '');
+  }
+  
+  // Remove compressed prefix but keep track of it
+  if (displayTitle.startsWith('[compressed]')) {
+    displayTitle = displayTitle.replace(/\[compressed\]\s*/, '');
+  }
+  
   return (
     <Card className="w-full overflow-hidden">
       <CardHeader className="pb-2">
-        <CardTitle className="text-lg font-bold line-clamp-1">
-          {/* Remove chunked prefix from display if present */}
-          {note.title?.startsWith('[chunked:') 
-            ? note.title.replace(/\[chunked:.*?\]\s*/, '') 
-            : note.title}
+        <CardTitle className="text-lg font-bold line-clamp-1 flex items-center gap-2">
+          {displayTitle}
+          {isCompressed && (
+            <span className="inline-flex items-center gap-1 text-amber-600 text-xs font-normal bg-amber-50 px-1.5 py-0.5 rounded-full">
+              <Scissors className="h-3 w-3" />
+              Compressed
+            </span>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="pb-2">

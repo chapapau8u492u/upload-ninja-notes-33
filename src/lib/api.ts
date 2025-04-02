@@ -1,10 +1,19 @@
-
 import { supabase } from "@/integrations/supabase/client";
 import { Note, NoteWithDetails } from "@/types";
-import { createFileChunks, uploadChunk, storeChunkMetadata, MAX_CHUNK_SIZE } from "@/lib/chunkUploader";
+import { 
+  createFileChunks, 
+  uploadChunk, 
+  storeChunkMetadata, 
+  MAX_CHUNK_SIZE,
+  compressFile,
+  formatFileSize
+} from "@/lib/chunkUploader";
 
 // We're setting a 50MB file size limit for direct uploads
 export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+
+// Compression threshold - files larger than this will be compressed
+export const COMPRESSION_THRESHOLD = 48 * 1024 * 1024; // 48 MB
 
 export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[]> {
   let query = supabase
@@ -43,24 +52,52 @@ export async function uploadNote(
 ): Promise<void> {
   console.log("Starting file upload:", { title, fileName: file.name, fileSize: file.size });
   
+  let fileToUpload: File | Blob = file;
+  let isCompressed = false;
+  
+  // For files over the compression threshold but under the max size, compress them
+  if (file.size > COMPRESSION_THRESHOLD && file.size <= MAX_FILE_SIZE * 1.5) {
+    try {
+      if (onProgress) onProgress(0, file.size);
+      console.log(`File size (${formatFileSize(file.size)}) exceeds compression threshold, compressing...`);
+      
+      fileToUpload = await compressFile(file);
+      isCompressed = true;
+      
+      console.log(`Compression complete: Original: ${formatFileSize(file.size)}, Compressed: ${formatFileSize(fileToUpload.size)}`);
+      
+      // Update title to indicate compression
+      title = isCompressed ? `[compressed] ${title}` : title;
+      
+      // If compression didn't reduce file size enough, use chunking
+      if (fileToUpload.size > MAX_FILE_SIZE) {
+        console.log("File still too large after compression, using chunked upload");
+        return uploadWithChunking(title, description, fileToUpload, userId, onProgress);
+      }
+    } catch (error) {
+      console.error("Compression failed, falling back to normal upload logic:", error);
+      // Continue with normal upload logic if compression fails
+    }
+  }
+  
   // For files under 50MB, use direct upload
-  if (file.size <= MAX_FILE_SIZE) {
-    return uploadDirectly(title, description, file, userId, onProgress);
+  if (fileToUpload.size <= MAX_FILE_SIZE) {
+    return uploadDirectly(title, description, fileToUpload, userId, onProgress);
   }
   
   // For larger files, use chunked upload
-  return uploadWithChunking(title, description, file, userId, onProgress);
+  return uploadWithChunking(title, description, fileToUpload, userId, onProgress);
 }
 
 // Original direct upload method for files under 50MB
 async function uploadDirectly(
   title: string,
   description: string,
-  file: File,
+  file: File | Blob,
   userId: string | null,
   onProgress?: (loaded: number, total: number) => void
 ): Promise<void> {
-  console.log("Starting direct upload:", { fileName: file.name });
+  console.log("Starting direct upload:", { fileName: file instanceof File ? file.name : 'Blob' });
   
   // Start with initial progress
   if (onProgress) onProgress(0, file.size);
@@ -70,7 +107,10 @@ async function uploadDirectly(
     const folderName = 'anonymous';
     
     // Generate a unique file name to prevent conflicts
-    const fileName = `${Date.now()}_${file.name}`;
+    const fileName = file instanceof File 
+      ? `${Date.now()}_${file.name}`
+      : `${Date.now()}_compressedFile.gz`;
+      
     const filePath = `${folderName}/${fileName}`;
     
     // Use direct upload with progress tracking
@@ -82,8 +122,9 @@ async function uploadDirectly(
     console.log("File uploaded successfully:", { fileUrl });
 
     // Determine file type and size
-    const fileType = file.type || 'application/octet-stream'; // Default type for unknown files
+    const fileType = file instanceof File ? (file.type || 'application/octet-stream') : 'application/gzip';
     const fileSize = formatFileSize(file.size);
+    const displayName = file instanceof File ? file.name : fileName;
 
     // Insert the note record
     const { error: insertError } = await supabase
@@ -94,7 +135,7 @@ async function uploadDirectly(
         file_url: fileUrl,
         file_type: fileType,
         file_size: fileSize,
-        file_name: file.name,
+        file_name: displayName,
         uploader_id: null, // Always null since we don't use auth
       });
 
@@ -116,11 +157,12 @@ async function uploadDirectly(
 async function uploadWithChunking(
   title: string,
   description: string,
-  file: File,
+  file: File | Blob,
   userId: string | null,
   onProgress?: (loaded: number, total: number) => void
 ): Promise<void> {
-  console.log("Starting chunked upload:", { fileName: file.name, fileSize: formatFileSize(file.size) });
+  const fileName = file instanceof File ? file.name : `compressedFile_${Date.now()}.gz`;
+  console.log("Starting chunked upload:", { fileName, fileSize: formatFileSize(file.size) });
   
   try {
     // Generate a unique upload ID for this file
@@ -157,8 +199,8 @@ async function uploadWithChunking(
     
     // After all chunks are uploaded, store metadata
     await storeChunkMetadata({
-      fileName: file.name,
-      fileType: file.type || 'application/octet-stream',
+      fileName: fileName,
+      fileType: file instanceof File ? (file.type || 'application/octet-stream') : 'application/gzip',
       totalChunks,
       totalSize: file.size,
       uploadId
@@ -179,7 +221,7 @@ async function uploadWithChunking(
 // Helper function for direct upload with precise progress tracking
 async function uploadWithProgress(
   filePath: string, 
-  file: File, 
+  file: File | Blob, 
   onProgress?: (loaded: number, total: number) => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {

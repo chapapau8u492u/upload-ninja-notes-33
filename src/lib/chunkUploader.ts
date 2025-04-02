@@ -4,6 +4,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import 'compression-streams-polyfill';
 
 // Maximum chunk size (5MB in bytes) - smaller than Supabase's limit
 export const MAX_CHUNK_SIZE = 5 * 1024 * 1024;
@@ -20,9 +21,35 @@ interface ChunkMetadata {
 }
 
 /**
+ * Compresses a file using GZIP compression
+ * @returns A compressed Blob with the same file type
+ */
+export async function compressFile(file: File): Promise<Blob> {
+  try {
+    console.log(`Starting compression for file: ${file.name} (${formatFileSize(file.size)})`);
+    
+    // Create a ReadableStream from the file
+    const fileStream = file.stream();
+    
+    // Compress the stream using GZIP
+    const compressedStream = fileStream.pipeThrough(new CompressionStream('gzip'));
+    
+    // Convert the compressed stream back to a blob
+    const compressedBlob = await new Response(compressedStream).blob();
+    
+    console.log(`Compression complete: Original size: ${formatFileSize(file.size)}, Compressed size: ${formatFileSize(compressedBlob.size)}`);
+    
+    return compressedBlob;
+  } catch (error) {
+    console.error("Error during file compression:", error);
+    throw new Error(`Compression failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
  * Splits a file into chunks of maximum size
  */
-export function createFileChunks(file: File, maxChunkSize: number = MAX_CHUNK_SIZE): Blob[] {
+export function createFileChunks(file: File | Blob, maxChunkSize: number = MAX_CHUNK_SIZE): Blob[] {
   const chunks: Blob[] = [];
   let start = 0;
   
@@ -158,7 +185,7 @@ export async function createChunkedFileRecord(
 }
 
 // Helper function to format file size
-function formatFileSize(bytes: number): string {
+export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 Bytes';
   
   const k = 1024;
