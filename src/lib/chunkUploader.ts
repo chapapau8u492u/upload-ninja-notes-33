@@ -59,6 +59,7 @@ export async function uploadChunk(
     const apiKey = getSupabaseKey();
     xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`);
     xhr.setRequestHeader('x-upsert', 'true');
+    xhr.setRequestHeader('Content-Type', chunk.type || 'application/octet-stream');
     
     // Track progress events
     xhr.upload.onprogress = (event) => {
@@ -103,21 +104,9 @@ export async function uploadChunk(
  * This function now only stores metadata in storage and creates a note record
  */
 export async function storeChunkMetadata(metadata: ChunkMetadata): Promise<void> {
-  const metadataPath = `metadata/${metadata.uploadId}`;
-  
   try {
-    // First store the metadata in storage
-    const { error } = await supabase.storage
-      .from('notes')
-      .upload(metadataPath, JSON.stringify(metadata));
-      
-    if (error) {
-      console.error("Failed to store metadata:", error);
-      throw new Error(`Failed to store metadata: ${error.message}`);
-    }
-    
-    // Instead of using the chunked_files table directly, we'll create a record in the notes table
-    // with a special flag/format that indicates this is for a chunked file
+    // Instead of creating a record in chunked_files table (which doesn't exist in the types),
+    // we'll create a notes record with special formatting
     await createChunkedFileRecord(
       metadata.fileName,
       `${getStorageUrl()}/object/notes/chunked/${metadata.uploadId}/${encodeURIComponent(metadata.fileName)}`,

@@ -101,14 +101,13 @@ export async function uploadNote(
   } catch (error) {
     console.error("Error in uploadNote:", error);
     // Make sure to show 100% at the end even if there was an error
-    if (onProgress) onProgress(0, file.size);
+    if (onProgress) onProgress(file.size, file.size);
     throw error;
   }
 }
 
 /**
  * Handles uploading of large files by splitting them into chunks
- * Only shows total progress to the user, not individual chunk progress
  */
 async function uploadLargeFile(
   file: File, 
@@ -179,7 +178,8 @@ async function uploadLargeFile(
     
     await storeChunkMetadata(metadata);
     
-    // Return a URL that would trigger server-side reassembly when accessed
+    // Return a URL that points to the file (even though it's chunked)
+    // This URL will be used for display purposes and to trigger downloads
     const fileUrl = `${getStorageUrl()}/object/notes/chunked/${uploadId}/${encodeURIComponent(file.name)}`;
     
     // Ensure we show 100% at the end
@@ -209,6 +209,7 @@ async function uploadWithProgress(
     const apiKey = getSupabaseKey();
     xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`);
     xhr.setRequestHeader('x-upsert', 'true');
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
     
     // Track progress events
     xhr.upload.onprogress = (event) => {

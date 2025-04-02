@@ -22,10 +22,16 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
         fileUrl.includes('/notes/chunked/');
       
       if (isChunkedFile) {
-        // For chunked files, show a toast and open in a new tab
-        handleChunkedFileDownload();
+        // For chunked files, show a toast and directly open the URL
+        toast({
+          title: "Opening file",
+          description: "The file will open in a new tab",
+        });
+        
+        // Use window.open directly without any further processing
+        window.open(fileUrl, '_blank');
       } else {
-        // For regular files, open in a new tab
+        // For regular files, just open in a new tab
         window.open(fileUrl, '_blank');
       }
     } catch (error) {
@@ -33,48 +39,6 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
       toast({
         title: "Error downloading file",
         description: "Please try again later",
-        variant: "destructive",
-      });
-    }
-  };
-  
-  // Handle downloading a file that was uploaded in chunks
-  const handleChunkedFileDownload = () => {
-    // Extract the upload ID - either from the title or from the URL
-    let uploadId: string | null = null;
-    
-    // Try to extract from title first
-    if (note.title?.startsWith('[chunked:')) {
-      const match = note.title.match(/\[chunked:(.*?)\]/);
-      if (match && match[1]) {
-        uploadId = match[1];
-      }
-    }
-    
-    // If not found in title, try to extract from URL
-    if (!uploadId && fileUrl.includes('/notes/chunked/')) {
-      const urlParts = fileUrl.split('/');
-      const uploadIdIndex = urlParts.indexOf('chunked') + 1;
-      
-      if (uploadIdIndex < urlParts.length) {
-        uploadId = urlParts[uploadIdIndex];
-      }
-    }
-    
-    if (uploadId) {
-      // Show a toast indicating the download is starting
-      toast({
-        title: "Preparing download",
-        description: "Your file download is starting...",
-      });
-      
-      // Open in a new tab
-      window.open(fileUrl, '_blank');
-    } else {
-      // Handle invalid URL format
-      toast({
-        title: "Error downloading file",
-        description: "Could not determine the file location",
         variant: "destructive",
       });
     }

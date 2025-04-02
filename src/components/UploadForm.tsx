@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -32,12 +31,6 @@ const uploadFormSchema = z.object({
 
 type UploadFormValues = z.infer<typeof uploadFormSchema>;
 
-// Create a type for the raw form values (before transformations)
-type RawUploadFormValues = {
-  title: string;
-  file: FileList;
-};
-
 interface UploadFormProps {
   onSuccess?: () => void;
 }
@@ -65,7 +58,16 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
       setUploadSpeed('Calculating...');
       setEstimatedTimeLeft('Calculating...');
       
-      const fileToUpload: File = data.file;
+      let fileToUpload: File = data.file;
+      
+      if (fileToUpload.name.endsWith('.txt') && (!fileToUpload.type || fileToUpload.type === '')) {
+        fileToUpload = new File(
+          [fileToUpload], 
+          fileToUpload.name, 
+          { type: 'text/plain' }
+        );
+      }
+      
       const startTime = Date.now();
       const fileSize = fileToUpload.size;
       let lastLoaded = 0;
@@ -146,7 +148,6 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       setSelectedFile(files[0]);
-      // Fix: Use type assertion to inform TypeScript about the expected type
       form.setValue("file", files as unknown as any, { shouldValidate: true });
     } else {
       setSelectedFile(null);
