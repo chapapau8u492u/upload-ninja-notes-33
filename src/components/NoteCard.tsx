@@ -22,7 +22,7 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
         fileUrl.includes('/notes/chunked/');
       
       if (isChunkedFile) {
-        // For chunked files, we need to handle the download differently
+        // For chunked files, show a toast and open in a new tab
         handleChunkedFileDownload();
       } else {
         // For regular files, open in a new tab

@@ -57,46 +57,53 @@ export async function uploadNote(
   
   let fileUrl: string;
   
-  if (needsChunking) {
-    // Use chunked upload for large files
-    fileUrl = await uploadLargeFile(file, folderName, onProgress);
-  } else {
-    // Use direct upload for small files
-    const fileName = `${Date.now()}_${file.name}`;
-    const filePath = `${folderName}/${fileName}`;
-    await uploadWithProgress(filePath, file, onProgress);
-    fileUrl = getFileUrl(filePath);
-  }
-
-  console.log("File uploaded successfully:", { fileUrl });
-
-  // For chunked files, we've already created the note record in storeChunkMetadata
-  // So we only need to create a record for non-chunked files
-  if (!needsChunking) {
-    // Determine file type and size
-    const fileType = file.type || 'unknown';
-    const fileSize = formatFileSize(file.size);
-
-    // Insert the note record
-    const { error: insertError } = await supabase
-      .from("notes")
-      .insert({
-        title,
-        description,
-        file_url: fileUrl,
-        file_type: fileType,
-        file_size: fileSize,
-        file_name: file.name,
-        uploader_id: null, // Always null since we don't use auth
-      });
-
-    if (insertError) {
-      console.error("Error creating note record:", insertError);
-      throw insertError;
+  try {
+    if (needsChunking) {
+      // Use chunked upload for large files
+      fileUrl = await uploadLargeFile(file, folderName, onProgress);
+    } else {
+      // Use direct upload for small files
+      const fileName = `${Date.now()}_${file.name}`;
+      const filePath = `${folderName}/${fileName}`;
+      await uploadWithProgress(filePath, file, onProgress);
+      fileUrl = getFileUrl(filePath);
     }
+
+    console.log("File uploaded successfully:", { fileUrl });
+
+    // For chunked files, we've already created the note record in storeChunkMetadata
+    // So we only need to create a record for non-chunked files
+    if (!needsChunking) {
+      // Determine file type and size
+      const fileType = file.type || 'application/octet-stream'; // Default type for unknown files
+      const fileSize = formatFileSize(file.size);
+
+      // Insert the note record
+      const { error: insertError } = await supabase
+        .from("notes")
+        .insert({
+          title,
+          description,
+          file_url: fileUrl,
+          file_type: fileType,
+          file_size: fileSize,
+          file_name: file.name,
+          uploader_id: null, // Always null since we don't use auth
+        });
+
+      if (insertError) {
+        console.error("Error creating note record:", insertError);
+        throw insertError;
+      }
+    }
+    
+    console.log("Note record created successfully");
+  } catch (error) {
+    console.error("Error in uploadNote:", error);
+    // Make sure to show 100% at the end even if there was an error
+    if (onProgress) onProgress(0, file.size);
+    throw error;
   }
-  
-  console.log("Note record created successfully");
 }
 
 /**
@@ -118,60 +125,71 @@ async function uploadLargeFile(
   // Track overall progress
   let totalUploaded = 0;
   const totalSize = file.size;
+  let lastReportedProgress = 0;
   
-  // Process chunks in batches to limit concurrency
-  for (let i = 0; i < chunks.length; i += MAX_PARALLEL_UPLOADS) {
-    const batch = chunks.slice(i, i + MAX_PARALLEL_UPLOADS);
-    
-    // Create promises for this batch
-    const batchPromises = batch.map((chunk, index) => {
-      const chunkIndex = i + index;
-      const chunkSize = chunk.size;
+  try {
+    // Process chunks in batches to limit concurrency
+    for (let i = 0; i < chunks.length; i += MAX_PARALLEL_UPLOADS) {
+      const batch = chunks.slice(i, i + MAX_PARALLEL_UPLOADS);
       
-      // Upload chunk
-      return uploadChunk(
-        chunk, 
-        chunkIndex, 
-        uploadId, 
-        folderName,
-        // Pass a dummy progress handler that we'll ignore
-        // This ensures we don't expose the chunking details to the user
-        () => {}
-      );
-    });
-    
-    // Wait for this batch to complete before starting the next one
-    const batchResults = await Promise.all(batchPromises);
-    
-    // Update progress after each batch
-    if (onProgress) {
-      // Calculate total progress based on completed chunks
-      const completedSize = chunks.slice(0, i + batch.length)
-        .reduce((sum, chunk) => sum + chunk.size, 0);
+      // Create promises for this batch
+      const batchPromises = batch.map((chunk, index) => {
+        const chunkIndex = i + index;
+        
+        // Upload chunk with a progress tracker that updates the total progress
+        return uploadChunk(
+          chunk, 
+          chunkIndex, 
+          uploadId, 
+          folderName,
+          // Pass a tracker that will contribute to total progress
+          (loaded, total) => {
+            // Calculate the progress contributed by this chunk to the total file
+            const chunkProgress = (loaded / total) * (chunk.size / totalSize);
+            
+            // Add this chunk's progress to the total uploaded
+            // This is an approximation as chunks may complete in different orders
+            totalUploaded = chunks.slice(0, i).reduce((sum, c) => sum + c.size, 0) + 
+                           loaded * (chunk.size / total);
+            
+            // Only report progress if it's changed by at least 1%
+            const currentProgress = Math.floor((totalUploaded / totalSize) * 100);
+            if (currentProgress > lastReportedProgress) {
+              lastReportedProgress = currentProgress;
+              if (onProgress) {
+                onProgress(totalUploaded, totalSize);
+              }
+            }
+          }
+        );
+      });
       
-      // Report progress to the user (aggregate only)
-      onProgress(Math.min(completedSize, totalSize), totalSize);
+      // Wait for this batch to complete before starting the next one
+      await Promise.all(batchPromises);
     }
+    
+    // Store metadata about this chunked upload
+    const metadata = {
+      fileName: file.name,
+      fileType: file.type || 'application/octet-stream', // Default type for unknown files
+      totalChunks: chunks.length,
+      totalSize: file.size,
+      uploadId
+    };
+    
+    await storeChunkMetadata(metadata);
+    
+    // Return a URL that would trigger server-side reassembly when accessed
+    const fileUrl = `${getStorageUrl()}/object/notes/chunked/${uploadId}/${encodeURIComponent(file.name)}`;
+    
+    // Ensure we show 100% at the end
+    if (onProgress) onProgress(totalSize, totalSize);
+    
+    return fileUrl;
+  } catch (error) {
+    console.error("Error in uploadLargeFile:", error);
+    throw error;
   }
-  
-  // Store metadata about this chunked upload
-  const metadata = {
-    fileName: file.name,
-    fileType: file.type,
-    totalChunks: chunks.length,
-    totalSize: file.size,
-    uploadId
-  };
-  
-  await storeChunkMetadata(metadata);
-  
-  // Return a URL that would trigger server-side reassembly when accessed
-  const fileUrl = `${getStorageUrl()}/object/notes/chunked/${uploadId}/${encodeURIComponent(file.name)}`;
-  
-  // Ensure we show 100% at the end
-  if (onProgress) onProgress(totalSize, totalSize);
-  
-  return fileUrl;
 }
 
 // Helper function for direct upload with precise progress tracking
@@ -206,6 +224,7 @@ async function uploadWithProgress(
         if (onProgress) onProgress(file.size, file.size); // Ensure 100% at the end
         resolve();
       } else {
+        console.error(`Upload failed with status ${xhr.status}:`, xhr.responseText);
         reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
       }
     };

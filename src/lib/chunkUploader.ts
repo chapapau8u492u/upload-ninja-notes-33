@@ -72,14 +72,24 @@ export async function uploadChunk(
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(filePath);
       } else {
+        console.error(`Chunk upload failed with status ${xhr.status}:`, xhr.responseText);
         reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
       }
     };
     
     // Handle errors
-    xhr.onerror = () => reject(new Error('Network error during upload'));
-    xhr.ontimeout = () => reject(new Error('Upload timed out'));
-    xhr.onabort = () => reject(new Error('Upload was aborted'));
+    xhr.onerror = () => {
+      console.error("Network error during chunk upload");
+      reject(new Error('Network error during upload'));
+    };
+    xhr.ontimeout = () => {
+      console.error("Chunk upload timed out");
+      reject(new Error('Upload timed out'));
+    };
+    xhr.onabort = () => {
+      console.error("Chunk upload was aborted");
+      reject(new Error('Upload was aborted'));
+    };
     
     // Create FormData and send
     const formData = new FormData();
@@ -90,30 +100,36 @@ export async function uploadChunk(
 
 /**
  * Store metadata about a chunked file upload
- * This version avoids using the chunked_files table directly due to TypeScript limitations
+ * This function now only stores metadata in storage and creates a note record
  */
 export async function storeChunkMetadata(metadata: ChunkMetadata): Promise<void> {
   const metadataPath = `metadata/${metadata.uploadId}`;
   
-  // First store the metadata in storage
-  const { error } = await supabase.storage
-    .from('notes')
-    .upload(metadataPath, JSON.stringify(metadata));
+  try {
+    // First store the metadata in storage
+    const { error } = await supabase.storage
+      .from('notes')
+      .upload(metadataPath, JSON.stringify(metadata));
+      
+    if (error) {
+      console.error("Failed to store metadata:", error);
+      throw new Error(`Failed to store metadata: ${error.message}`);
+    }
     
-  if (error) {
-    throw new Error(`Failed to store metadata: ${error.message}`);
+    // Instead of using the chunked_files table directly, we'll create a record in the notes table
+    // with a special flag/format that indicates this is for a chunked file
+    await createChunkedFileRecord(
+      metadata.fileName,
+      `${getStorageUrl()}/object/notes/chunked/${metadata.uploadId}/${encodeURIComponent(metadata.fileName)}`,
+      metadata.uploadId,
+      metadata.totalChunks,
+      metadata.fileType,
+      formatFileSize(metadata.totalSize)
+    );
+  } catch (error) {
+    console.error("Error in storeChunkMetadata:", error);
+    throw error;
   }
-  
-  // Instead of using the chunked_files table directly, we'll create a record in the notes table
-  // with a special flag/format that indicates this is for a chunked file
-  await createChunkedFileRecord(
-    metadata.fileName,
-    `${getStorageUrl()}/object/notes/chunked/${metadata.uploadId}/${encodeURIComponent(metadata.fileName)}`,
-    metadata.uploadId,
-    metadata.totalChunks,
-    metadata.fileType,
-    formatFileSize(metadata.totalSize)
-  );
 }
 
 /**
@@ -127,24 +143,29 @@ export async function createChunkedFileRecord(
   fileType: string,
   fileSize: string
 ): Promise<void> {
-  // Using a special title format to identify chunked files
-  const title = `[chunked:${uploadId}] ${fileName}`;
-  const description = `Chunked file upload (${totalChunks} chunks). Upload ID: ${uploadId}`;
-  
-  const { error } = await supabase
-    .from("notes")
-    .insert({
-      title: title,
-      description: description,
-      file_name: fileName,
-      file_url: fileUrl,
-      file_type: fileType,
-      file_size: fileSize
-    });
+  try {
+    // Using a special title format to identify chunked files
+    const title = `[chunked:${uploadId}] ${fileName}`;
+    const description = `Chunked file upload (${totalChunks} chunks). Upload ID: ${uploadId}`;
     
-  if (error) {
-    console.error("Error creating chunked file record:", error);
-    throw new Error(`Failed to create chunked file record: ${error.message}`);
+    const { error } = await supabase
+      .from("notes")
+      .insert({
+        title: title,
+        description: description,
+        file_name: fileName,
+        file_url: fileUrl,
+        file_type: fileType || 'application/octet-stream', // Default type for unknown files
+        file_size: fileSize
+      });
+      
+    if (error) {
+      console.error("Error creating chunked file record:", error);
+      throw new Error(`Failed to create chunked file record: ${error.message}`);
+    }
+  } catch (error) {
+    console.error("Error in createChunkedFileRecord:", error);
+    throw error;
   }
 }
 
