@@ -16,28 +16,27 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
   
   const handleDownload = () => {
     try {
-      // Check if this is a chunked file by looking at the title or URL
+      // Check if this is a chunked file by looking at the URL or title
       const isChunkedFile = 
-        (note.title?.startsWith('[chunked:') || false) || 
-        fileUrl.includes('/notes/chunked/');
+        fileUrl.includes('/chunked/') || 
+        (note.title?.startsWith('[chunked:') || false);
       
       if (isChunkedFile) {
-        // For chunked files, show a toast and directly open the URL
+        // For chunked files, show a toast and open the URL in a new tab
         toast({
           title: "Opening file",
           description: "The file will open in a new tab",
         });
         
-        // Use window.open directly without any further processing
         window.open(fileUrl, '_blank');
       } else {
-        // For regular files, just open in a new tab
+        // For regular files, attempt to download
         window.open(fileUrl, '_blank');
       }
     } catch (error) {
-      console.error("Error downloading file:", error);
+      console.error("Error handling file:", error);
       toast({
-        title: "Error downloading file",
+        title: "Error accessing file",
         description: "Please try again later",
         variant: "destructive",
       });
@@ -87,7 +86,7 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
           className="gap-1"
         >
           <Download className="h-4 w-4" />
-          Download
+          {fileUrl.includes('/chunked/') ? "Open" : "Download"}
         </Button>
       </CardFooter>
     </Card>
