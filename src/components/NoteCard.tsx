@@ -1,3 +1,4 @@
+
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Download, FileText } from "lucide-react";
@@ -15,8 +16,10 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
   
   const handleDownload = () => {
     try {
-      // Check if this is a chunked file download by looking for the 'chunked' path
-      const isChunkedFile = fileUrl.includes('/notes/chunked/');
+      // Check if this is a chunked file by looking at the title or URL
+      const isChunkedFile = 
+        (note.title?.startsWith('[chunked:') || false) || 
+        fileUrl.includes('/notes/chunked/');
       
       if (isChunkedFile) {
         // For chunked files, we need to handle the download differently
@@ -37,36 +40,41 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
   
   // Handle downloading a file that was uploaded in chunks
   const handleChunkedFileDownload = () => {
-    // Extract the upload ID from the file URL
-    const urlParts = fileUrl.split('/');
-    const uploadIdIndex = urlParts.indexOf('chunked') + 1;
+    // Extract the upload ID - either from the title or from the URL
+    let uploadId: string | null = null;
     
-    if (uploadIdIndex < urlParts.length) {
-      const uploadId = urlParts[uploadIdIndex];
+    // Try to extract from title first
+    if (note.title?.startsWith('[chunked:')) {
+      const match = note.title.match(/\[chunked:(.*?)\]/);
+      if (match && match[1]) {
+        uploadId = match[1];
+      }
+    }
+    
+    // If not found in title, try to extract from URL
+    if (!uploadId && fileUrl.includes('/notes/chunked/')) {
+      const urlParts = fileUrl.split('/');
+      const uploadIdIndex = urlParts.indexOf('chunked') + 1;
       
+      if (uploadIdIndex < urlParts.length) {
+        uploadId = urlParts[uploadIdIndex];
+      }
+    }
+    
+    if (uploadId) {
       // Show a toast indicating the download is starting
       toast({
         title: "Preparing download",
-        description: "Please wait while we prepare your file...",
+        description: "Your file download is starting...",
       });
       
-      // In a production app, this would call a serverless function to handle
-      // the reassembly of chunks. For now, we'll simulate a successful download
-      // after a short delay.
-      setTimeout(() => {
-        // Create a link to download the file in a new tab
-        window.open(fileUrl, '_blank');
-        
-        toast({
-          title: "Download started",
-          description: "Your file download has started",
-        });
-      }, 1500);
+      // Open in a new tab
+      window.open(fileUrl, '_blank');
     } else {
       // Handle invalid URL format
       toast({
         title: "Error downloading file",
-        description: "Invalid file URL format",
+        description: "Could not determine the file location",
         variant: "destructive",
       });
     }
@@ -83,10 +91,15 @@ export const NoteCard = ({ note, onDelete }: NoteCardProps) => {
   return (
     <Card className="w-full overflow-hidden">
       <CardHeader className="pb-2">
-        <CardTitle className="text-lg font-bold line-clamp-1">{note.title}</CardTitle>
+        <CardTitle className="text-lg font-bold line-clamp-1">
+          {/* Remove chunked prefix from display if present */}
+          {note.title?.startsWith('[chunked:') 
+            ? note.title.replace(/\[chunked:.*?\]\s*/, '') 
+            : note.title}
+        </CardTitle>
       </CardHeader>
       <CardContent className="pb-2">
-        {note.description && (
+        {note.description && !note.description.includes('Chunked file upload') && (
           <p className="text-sm text-gray-500 mb-2 line-clamp-2">{note.description}</p>
         )}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-500">

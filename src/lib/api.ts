@@ -1,3 +1,4 @@
+
 import { supabase } from "@/integrations/supabase/client";
 import { Note, NoteWithDetails } from "@/types";
 import { 
@@ -69,26 +70,30 @@ export async function uploadNote(
 
   console.log("File uploaded successfully:", { fileUrl });
 
-  // Determine file type and size
-  const fileType = file.type || 'unknown';
-  const fileSize = formatFileSize(file.size);
+  // For chunked files, we've already created the note record in storeChunkMetadata
+  // So we only need to create a record for non-chunked files
+  if (!needsChunking) {
+    // Determine file type and size
+    const fileType = file.type || 'unknown';
+    const fileSize = formatFileSize(file.size);
 
-  // Insert the note record
-  const { error: insertError } = await supabase
-    .from("notes")
-    .insert({
-      title,
-      description,
-      file_url: fileUrl,
-      file_type: fileType,
-      file_size: fileSize,
-      file_name: file.name,
-      uploader_id: null, // Always null since we don't use auth
-    });
+    // Insert the note record
+    const { error: insertError } = await supabase
+      .from("notes")
+      .insert({
+        title,
+        description,
+        file_url: fileUrl,
+        file_type: fileType,
+        file_size: fileSize,
+        file_name: file.name,
+        uploader_id: null, // Always null since we don't use auth
+      });
 
-  if (insertError) {
-    console.error("Error creating note record:", insertError);
-    throw insertError;
+    if (insertError) {
+      console.error("Error creating note record:", insertError);
+      throw insertError;
+    }
   }
   
   console.log("Note record created successfully");
@@ -114,29 +119,6 @@ async function uploadLargeFile(
   let totalUploaded = 0;
   const totalSize = file.size;
   
-  // Updated progress tracking function that aggregates all chunk progress
-  // but only reports the overall progress to the user
-  const trackTotalProgress = (chunkSize: number) => 
-    (loaded: number, total: number) => {
-      // Calculate how much of this chunk has been uploaded
-      const chunkProgress = loaded / total;
-      const chunkUploaded = chunkProgress * chunkSize;
-      
-      // Accumulate to total uploaded (this keeps a running sum of all chunks)
-      totalUploaded += chunkUploaded;
-      
-      // Ensure we don't exceed the total file size in our progress calculation
-      const normalizedUploaded = Math.min(totalUploaded, totalSize);
-      
-      // Report progress (but only once per chunk completion to avoid too many updates)
-      if (onProgress && (chunkProgress === 1 || Math.random() < 0.1)) {
-        onProgress(normalizedUploaded, totalSize);
-      }
-    };
-  
-  // Upload chunks in parallel with limited concurrency
-  const chunkPaths: string[] = [];
-  
   // Process chunks in batches to limit concurrency
   for (let i = 0; i < chunks.length; i += MAX_PARALLEL_UPLOADS) {
     const batch = chunks.slice(i, i + MAX_PARALLEL_UPLOADS);
@@ -144,24 +126,31 @@ async function uploadLargeFile(
     // Create promises for this batch
     const batchPromises = batch.map((chunk, index) => {
       const chunkIndex = i + index;
+      const chunkSize = chunk.size;
+      
+      // Upload chunk
       return uploadChunk(
         chunk, 
         chunkIndex, 
         uploadId, 
         folderName,
-        trackTotalProgress(chunk.size)
+        // Pass a dummy progress handler that we'll ignore
+        // This ensures we don't expose the chunking details to the user
+        () => {}
       );
     });
     
     // Wait for this batch to complete before starting the next one
     const batchResults = await Promise.all(batchPromises);
-    chunkPaths.push(...batchResults);
     
     // Update progress after each batch
     if (onProgress) {
+      // Calculate total progress based on completed chunks
       const completedSize = chunks.slice(0, i + batch.length)
         .reduce((sum, chunk) => sum + chunk.size, 0);
-      onProgress(completedSize, totalSize);
+      
+      // Report progress to the user (aggregate only)
+      onProgress(Math.min(completedSize, totalSize), totalSize);
     }
   }
   

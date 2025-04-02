@@ -90,10 +90,12 @@ export async function uploadChunk(
 
 /**
  * Store metadata about a chunked file upload
+ * This version avoids using the chunked_files table directly due to TypeScript limitations
  */
 export async function storeChunkMetadata(metadata: ChunkMetadata): Promise<void> {
   const metadataPath = `metadata/${metadata.uploadId}`;
   
+  // First store the metadata in storage
   const { error } = await supabase.storage
     .from('notes')
     .upload(metadataPath, JSON.stringify(metadata));
@@ -102,40 +104,59 @@ export async function storeChunkMetadata(metadata: ChunkMetadata): Promise<void>
     throw new Error(`Failed to store metadata: ${error.message}`);
   }
   
-  // After storing the metadata in storage, create a database record
-  await createFileReassemblyRecord(
+  // Instead of using the chunked_files table directly, we'll create a record in the notes table
+  // with a special flag/format that indicates this is for a chunked file
+  await createChunkedFileRecord(
     metadata.fileName,
     `${getStorageUrl()}/object/notes/chunked/${metadata.uploadId}/${encodeURIComponent(metadata.fileName)}`,
     metadata.uploadId,
-    metadata.totalChunks
+    metadata.totalChunks,
+    metadata.fileType,
+    formatFileSize(metadata.totalSize)
   );
 }
 
 /**
- * Create a database record to track the chunked file
+ * Create a database record to track the chunked file using the notes table
  */
-export async function createFileReassemblyRecord(
+export async function createChunkedFileRecord(
   fileName: string,
   fileUrl: string,
   uploadId: string,
-  totalChunks: number
+  totalChunks: number,
+  fileType: string,
+  fileSize: string
 ): Promise<void> {
-  // For now, we simply create a record in the database that will be used
-  // to identify this file as a chunked upload when downloading
+  // Using a special title format to identify chunked files
+  const title = `[chunked:${uploadId}] ${fileName}`;
+  const description = `Chunked file upload (${totalChunks} chunks). Upload ID: ${uploadId}`;
+  
   const { error } = await supabase
-    .from("chunked_files")
+    .from("notes")
     .insert({
-      upload_id: uploadId,
+      title: title,
+      description: description,
       file_name: fileName,
-      total_chunks: totalChunks,
-      reassembled_url: fileUrl,
-      is_processed: false
+      file_url: fileUrl,
+      file_type: fileType,
+      file_size: fileSize
     });
     
   if (error) {
-    console.error("Error creating reassembly record:", error);
-    throw new Error(`Failed to create reassembly record: ${error.message}`);
+    console.error("Error creating chunked file record:", error);
+    throw new Error(`Failed to create chunked file record: ${error.message}`);
   }
+}
+
+// Helper function to format file size
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 // Helper functions
