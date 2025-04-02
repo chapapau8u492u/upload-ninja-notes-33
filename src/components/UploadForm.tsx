@@ -299,3 +299,5 @@ export const UploadForm = ({ onSuccess }: UploadFormProps) => {
     </Form>
   );
 };
+
+export { UploadForm };
