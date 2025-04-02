@@ -1,17 +1,42 @@
 
 import { supabase } from "@/integrations/supabase/client";
+import { Note, NoteWithDetails } from "@/types";
 import { 
   MAX_CHUNK_SIZE, 
   createFileChunks, 
   uploadChunk,
   storeChunkMetadata,
   MAX_PARALLEL_UPLOADS
-} from "../chunkUploader";
-import { formatFileSize, getFileUrl, getStorageUrl, getSupabaseKey } from "./helpers";
+} from "./chunkUploader";
 
-/**
- * Upload a note to the database
- */
+export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[]> {
+  let query = supabase
+    .from("notes")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (searchQuery) {
+    query = query.ilike("title", `%${searchQuery}%`);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Error fetching notes:", error);
+    throw error;
+  }
+
+  // Map notes to include default profile information
+  const notes = (data || []).map((note: any) => {
+    return {
+      ...note,
+      profile: { username: "Anonymous User" }, // Default profile for all notes
+    };
+  });
+
+  return notes;
+}
+
 export async function uploadNote(
   title: string,
   description: string,
@@ -168,7 +193,7 @@ async function uploadLargeFile(
 }
 
 // Helper function for direct upload with precise progress tracking
-export async function uploadWithProgress(
+async function uploadWithProgress(
   filePath: string, 
   file: File, 
   onProgress?: (loaded: number, total: number) => void
@@ -229,4 +254,60 @@ export async function uploadWithProgress(
     formData.append('file', file);
     xhr.send(formData);
   });
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+export async function deleteNote(note: Note): Promise<void> {
+  // Extract filename from the file_url
+  const urlParts = note.file_url.split('/');
+  const filePath = urlParts[urlParts.length - 2] + '/' + urlParts[urlParts.length - 1];
+  
+  // 1. Delete the file from storage
+  const { error: storageError } = await supabase.storage
+    .from("notes")
+    .remove([filePath]);
+
+  if (storageError) {
+    console.error("Error deleting file:", storageError);
+    throw storageError;
+  }
+
+  // 2. Delete the note record
+  const { error: dbError } = await supabase
+    .from("notes")
+    .delete()
+    .eq("id", note.id);
+
+  if (dbError) {
+    console.error("Error deleting note record:", dbError);
+    throw dbError;
+  }
+}
+
+// Define getFileUrl function only once
+export function getFileUrl(filePath: string): string {
+  const { data } = supabase.storage.from("notes").getPublicUrl(filePath);
+  return data.publicUrl;
+}
+
+export async function getUserNotes(userId: string): Promise<NoteWithDetails[]> {
+  return []; // Since we don't have auth, just return empty array
+}
+
+// Helper functions for upload
+function getStorageUrl(): string {
+  return 'https://qxmmsuakpqgcfhmngmjb.supabase.co/storage/v1';
+}
+
+function getSupabaseKey(): string {
+  return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF4bW1zdWFrcHFnY2ZobW5nbWpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM0ODEzNzcsImV4cCI6MjA1OTA1NzM3N30.BkT-HrDlR2HJ6iAhuaIFMD7H_jRFIu0Y9hpiSyU4EHY';
 }
