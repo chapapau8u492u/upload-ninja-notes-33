@@ -22,3 +22,14 @@ export interface Profile {
 export interface NoteWithDetails extends Note {
   profile: Profile;
 }
+
+export interface ChunkedFile {
+  id: string;
+  upload_id: string;
+  file_name: string;
+  total_chunks: number;
+  reassembled_url: string;
+  is_processed: boolean;
+  created_at: string;
+  updated_at: string;
+}

@@ -1,6 +1,13 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { Note, NoteWithDetails } from "@/types";
+import { 
+  MAX_CHUNK_SIZE, 
+  createFileChunks, 
+  uploadChunk,
+  storeChunkMetadata,
+  MAX_PARALLEL_UPLOADS
+} from "./chunkUploader";
 
 export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[]> {
   let query = supabase
@@ -38,26 +45,34 @@ export async function uploadNote(
   onProgress?: (loaded: number, total: number) => void
 ): Promise<void> {
   console.log("Starting file upload:", { title, fileName: file.name });
-  const fileName = `${Date.now()}_${file.name}`;
   
   // Create folder path - always use 'anonymous' since we don't have auth
   const folderName = 'anonymous';
-  const filePath = `${folderName}/${fileName}`;
+  
+  // Determine if we need chunked upload
+  const needsChunking = file.size > MAX_CHUNK_SIZE;
   
   // Start with initial progress
   if (onProgress) onProgress(0, file.size);
   
-  // For all files, use the direct XHR upload to track progress accurately
-  await uploadWithProgress(filePath, file, onProgress);
+  let fileUrl: string;
   
-  // Get the public URL of the uploaded file
-  const fileUrl = getFileUrl(filePath);
-  
+  if (needsChunking) {
+    // Use chunked upload for large files
+    fileUrl = await uploadLargeFile(file, folderName, onProgress);
+  } else {
+    // Use direct upload for small files
+    const fileName = `${Date.now()}_${file.name}`;
+    const filePath = `${folderName}/${fileName}`;
+    await uploadWithProgress(filePath, file, onProgress);
+    fileUrl = getFileUrl(filePath);
+  }
+
+  console.log("File uploaded successfully:", { fileUrl });
+
   // Determine file type and size
   const fileType = file.type || 'unknown';
   const fileSize = formatFileSize(file.size);
-
-  console.log("File uploaded successfully:", { fileUrl, fileType, fileSize });
 
   // Insert the note record
   const { error: insertError } = await supabase
@@ -73,13 +88,91 @@ export async function uploadNote(
     });
 
   if (insertError) {
-    // Attempt to clean up the file if the record insertion fails
-    await supabase.storage.from("notes").remove([filePath]);
     console.error("Error creating note record:", insertError);
     throw insertError;
   }
   
   console.log("Note record created successfully");
+}
+
+/**
+ * Handles uploading of large files by splitting them into chunks
+ */
+async function uploadLargeFile(
+  file: File, 
+  folderName: string,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<string> {
+  // Generate a unique ID for this upload
+  const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+  
+  // Split the file into chunks
+  const chunks = createFileChunks(file);
+  console.log(`File split into ${chunks.length} chunks for upload`);
+  
+  // Track overall progress
+  let totalUploaded = 0;
+  const totalSize = file.size;
+  
+  // Progress tracking function for individual chunks
+  const chunkProgressTracker = (chunkIndex: number, chunkSize: number) => 
+    (loaded: number, total: number) => {
+      // Calculate how much of this chunk has been uploaded
+      const chunkUploaded = (loaded / total) * chunkSize;
+      
+      // Add to total, subtracting previous progress for this chunk
+      const previousProgress = totalUploaded;
+      totalUploaded = chunks
+        .slice(0, chunkIndex)
+        .reduce((sum, chunk) => sum + chunk.size, 0) + chunkUploaded;
+      
+      // Report progress
+      if (onProgress && (totalUploaded > previousProgress || loaded === total)) {
+        onProgress(totalUploaded, totalSize);
+      }
+    };
+  
+  // Upload chunks in parallel with limited concurrency
+  const chunkPaths: string[] = [];
+  
+  // Process chunks in batches to limit concurrency
+  for (let i = 0; i < chunks.length; i += MAX_PARALLEL_UPLOADS) {
+    const batch = chunks.slice(i, i + MAX_PARALLEL_UPLOADS);
+    const batchIndexes = Array.from({ length: batch.length }, (_, idx) => i + idx);
+    
+    const batchPromises = batch.map((chunk, index) => {
+      const chunkIndex = batchIndexes[index];
+      return uploadChunk(
+        chunk, 
+        chunkIndex, 
+        uploadId, 
+        folderName,
+        chunkProgressTracker(chunkIndex, chunk.size)
+      );
+    });
+    
+    // Wait for this batch to complete before starting the next one
+    const batchResults = await Promise.all(batchPromises);
+    chunkPaths.push(...batchResults);
+  }
+  
+  // Store metadata about this chunked upload
+  const metadata = {
+    fileName: file.name,
+    fileType: file.type,
+    totalChunks: chunks.length,
+    totalSize: file.size,
+    uploadId
+  };
+  
+  await storeChunkMetadata(metadata);
+  
+  // Return a URL that would trigger server-side reassembly when accessed
+  // In a real implementation, this would point to a Supabase Edge Function
+  // that handles the reassembly and returns the complete file
+  const fileUrl = `${getStorageUrl()}/object/notes/chunked/${uploadId}/${encodeURIComponent(file.name)}`;
+  
+  return fileUrl;
 }
 
 // Helper function for direct upload with precise progress tracking
