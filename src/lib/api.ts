@@ -2,6 +2,9 @@
 import { supabase } from "@/integrations/supabase/client";
 import { Note, NoteWithDetails } from "@/types";
 
+// We're setting a 50MB file size limit
+export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+
 export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[]> {
   let query = supabase
     .from("notes")
@@ -38,6 +41,11 @@ export async function uploadNote(
   onProgress?: (loaded: number, total: number) => void
 ): Promise<void> {
   console.log("Starting file upload:", { title, fileName: file.name });
+  
+  // Validate file size before attempting upload
+  if (file.size > MAX_FILE_SIZE) {
+    throw new Error(`File size exceeds the 50MB limit. Your file: ${formatFileSize(file.size)}`);
+  }
   
   // Create folder path - always use 'anonymous' since we don't have auth
   const folderName = 'anonymous';
