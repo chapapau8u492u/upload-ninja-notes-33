@@ -5,8 +5,8 @@
 
 import { supabase } from "@/integrations/supabase/client";
 
-// Maximum chunk size (45MB in bytes)
-export const MAX_CHUNK_SIZE = 45 * 1024 * 1024;
+// Maximum chunk size (5MB in bytes) - smaller than Supabase's limit
+export const MAX_CHUNK_SIZE = 5 * 1024 * 1024;
 
 // Maximum parallel uploads
 export const MAX_PARALLEL_UPLOADS = 3;
@@ -101,7 +101,6 @@ export async function uploadChunk(
 
 /**
  * Store metadata about a chunked file upload
- * This function now only stores metadata in storage and creates a note record
  */
 export async function storeChunkMetadata(metadata: ChunkMetadata): Promise<void> {
   try {

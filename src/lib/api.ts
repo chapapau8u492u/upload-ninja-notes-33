@@ -1,8 +1,9 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { Note, NoteWithDetails } from "@/types";
+import { createFileChunks, uploadChunk, storeChunkMetadata, MAX_CHUNK_SIZE } from "@/lib/chunkUploader";
 
-// We're setting a 50MB file size limit
+// We're setting a 50MB file size limit for direct uploads
 export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 export async function fetchNotes(searchQuery?: string): Promise<NoteWithDetails[]> {
@@ -40,20 +41,34 @@ export async function uploadNote(
   userId: string | null,
   onProgress?: (loaded: number, total: number) => void
 ): Promise<void> {
-  console.log("Starting file upload:", { title, fileName: file.name });
+  console.log("Starting file upload:", { title, fileName: file.name, fileSize: file.size });
   
-  // Validate file size before attempting upload
-  if (file.size > MAX_FILE_SIZE) {
-    throw new Error(`File size exceeds the 50MB limit. Your file: ${formatFileSize(file.size)}`);
+  // For files under 50MB, use direct upload
+  if (file.size <= MAX_FILE_SIZE) {
+    return uploadDirectly(title, description, file, userId, onProgress);
   }
   
-  // Create folder path - always use 'anonymous' since we don't have auth
-  const folderName = 'anonymous';
+  // For larger files, use chunked upload
+  return uploadWithChunking(title, description, file, userId, onProgress);
+}
+
+// Original direct upload method for files under 50MB
+async function uploadDirectly(
+  title: string,
+  description: string,
+  file: File,
+  userId: string | null,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<void> {
+  console.log("Starting direct upload:", { fileName: file.name });
   
   // Start with initial progress
   if (onProgress) onProgress(0, file.size);
   
   try {
+    // Create folder path - always use 'anonymous' since we don't have auth
+    const folderName = 'anonymous';
+    
     // Generate a unique file name to prevent conflicts
     const fileName = `${Date.now()}_${file.name}`;
     const filePath = `${folderName}/${fileName}`;
@@ -91,6 +106,70 @@ export async function uploadNote(
     console.log("Note record created successfully");
   } catch (error) {
     console.error("Error in uploadNote:", error);
+    // Make sure to show 100% at the end even if there was an error
+    if (onProgress) onProgress(file.size, file.size);
+    throw error;
+  }
+}
+
+// New chunked upload for large files
+async function uploadWithChunking(
+  title: string,
+  description: string,
+  file: File,
+  userId: string | null,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<void> {
+  console.log("Starting chunked upload:", { fileName: file.name, fileSize: formatFileSize(file.size) });
+  
+  try {
+    // Generate a unique upload ID for this file
+    const uploadId = `${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    const folderName = 'chunked'; // Store chunks in a specific folder
+    
+    // Split file into chunks
+    const chunks = createFileChunks(file);
+    const totalChunks = chunks.length;
+    
+    console.log(`File split into ${totalChunks} chunks`);
+    
+    let totalUploaded = 0;
+    const totalSize = file.size;
+    
+    // Upload each chunk with progress tracking
+    for (let i = 0; i < totalChunks; i++) {
+      const chunk = chunks[i];
+      const chunkProgress = (loaded: number) => {
+        if (onProgress) {
+          // Calculate overall progress
+          const overallLoaded = totalUploaded + loaded;
+          onProgress(overallLoaded, totalSize);
+        }
+      };
+      
+      // Upload this chunk
+      await uploadChunk(chunk, i, uploadId, folderName, chunkProgress);
+      
+      // Update the total uploaded size
+      totalUploaded += chunk.size;
+      console.log(`Chunk ${i+1}/${totalChunks} uploaded, total progress: ${Math.round((totalUploaded / totalSize) * 100)}%`);
+    }
+    
+    // After all chunks are uploaded, store metadata
+    await storeChunkMetadata({
+      fileName: file.name,
+      fileType: file.type || 'application/octet-stream',
+      totalChunks,
+      totalSize: file.size,
+      uploadId
+    });
+    
+    console.log("All chunks uploaded successfully, metadata stored");
+    
+    // Ensure progress is set to 100% at the end
+    if (onProgress) onProgress(totalSize, totalSize);
+  } catch (error) {
+    console.error("Error in chunked upload:", error);
     // Make sure to show 100% at the end even if there was an error
     if (onProgress) onProgress(file.size, file.size);
     throw error;
